@@ -31,6 +31,9 @@ This tool automates the workflow for researchers to:
   - [Log Levels](#log-levels)
   - [Log to File](#log-to-file)
 - [Advanced Usage Examples](#advanced-usage-examples)
+- [FAQ](#faq)
+  - [Topic Search Tips](#topic-search-tips)
+  - [Common Issues](#common-issues)
 - [Troubleshooting](#troubleshooting)
 
 ## Requirements
@@ -388,6 +391,88 @@ For thorough analysis, you might run the tool with different models:
 ```bash
 python biorxiv_summarizer.py --topic "protein structure prediction" --rank_by date \
   --model "gpt-4" --custom_prompt "expert_analysis.md"
+```
+
+## FAQ
+
+### Topic Search Tips
+
+#### Why isn't my topic search returning any papers?
+
+The topic search functionality has a few important characteristics to be aware of:
+
+1. **Exact Matching**: By default, the tool searches for exact matches of your topics in the paper's metadata (title, abstract, category, etc.)
+
+2. **ALL vs ANY Matching**: When using multiple topics, the default behavior requires ALL topics to be present in a paper's metadata
+
+3. **Case Sensitivity**: Topic searches are case-insensitive, but special characters matter
+
+If you're not getting results, try these approaches:
+
+```bash
+# Use broader or fewer terms
+python biorxiv_summarizer.py --topics "transcriptomics" --max_papers 1 --days 60
+
+# Use ANY matching instead of ALL
+python biorxiv_summarizer.py --topics "Computational Biology" "Bioinformatics" "Single-Cell Transcriptomics" --topic_match any --max_papers 1 --days 60
+
+# Increase the search window
+python biorxiv_summarizer.py --topics "Computational Biology" --days 90 --max_papers 5
+
+# Use fuzzy matching (matches similar terms)
+python biorxiv_summarizer.py --topics "RNA-seq" --fuzzy_match --max_papers 5
+```
+
+#### What text is being searched when I provide topics?
+
+When you provide topics, the tool searches through:
+
+1. Paper title and abstract
+2. Category/subject tags (with higher weight)
+3. Paper type and collection information
+4. Tags or keywords
+5. Author names
+
+Sometimes the bioRxiv API might not classify papers with the exact terms you're searching for. For example, a paper might use "single cell RNA-seq" instead of "Single-Cell Transcriptomics".
+
+### Common Issues
+
+#### Special characters in search terms
+
+If your search terms contain special characters like hyphens (e.g., "RNA-seq"), these might be interpreted as regex special characters. Use the `--fuzzy_match` option to handle these cases better.
+
+#### Fuzzy matching
+
+The `--fuzzy_match` parameter implements a more flexible topic matching system that helps find relevant papers even when the exact terms don't appear in the paper's metadata. Here's what it does:
+
+- Word-by-word matching: Instead of requiring the entire topic phrase to match exactly, it breaks down each topic into individual words and looks for those words in the paper's metadata.
+- Partial matching threshold: It considers a topic to be a match if at least 70% of the words in that topic are found in the paper's metadata.
+- Special character handling: It replaces special characters (like hyphens in "RNA-seq") with a regex dot (.) which acts as a wildcard, allowing matches even when special characters are formatted differently.
+- Short word skipping: Words shorter than 3 characters are automatically considered matches, as they're often not meaningful for search (like "of", "in", etc.).
+For example, if you search for "Single-Cell Transcriptomics":
+
+- Without fuzzy matching: The paper must contain this exact phrase
+- With fuzzy matching: The paper only needs to contain most of the words "single", "cell", and "transcriptomics" in any form
+This is particularly helpful for:
+
+- Terms with special characters like "RNA-seq" or "single-cell"
+- Variations in terminology (e.g., "transcriptomics" vs "transcriptomic analysis")
+- Finding papers that use similar but not identical phrasing
+
+#### No papers found with multiple specific topics
+
+Requiring ALL topics to be present in a paper's metadata can be very restrictive. Try using `--topic_match any` to find papers that match at least one of your topics.
+
+#### Getting too many irrelevant results
+
+If you're getting too many papers that aren't relevant to your interests, try:
+
+```bash
+# Combine multiple specific topics with ALL matching
+python biorxiv_summarizer.py --topics "CRISPR" "gene therapy" "clinical trials" --topic_match all
+
+# Combine topic and author search
+python biorxiv_summarizer.py --topics "CRISPR" --authors "Zhang F" --days 90
 ```
 
 ## Troubleshooting
