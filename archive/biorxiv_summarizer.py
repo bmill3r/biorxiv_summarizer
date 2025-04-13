@@ -143,24 +143,28 @@ class BioRxivSearcher:
         if category:
             # Add category multiple times to give it more weight in the search
             searchable_text += ' ' + category * 5  # Increased weight for categories
-            logger.debug(f"Paper category: {category}")
+            if logger.level <= logging.DEBUG:
+                logger.debug(f"Paper category: {category}")
         
         # Some papers might have 'type' or 'collection' fields that indicate the subject area
         paper_type = paper.get('type', '')
         if paper_type:
             searchable_text += ' ' + paper_type * 3
-            logger.debug(f"Paper type: {paper_type}")
+            if logger.level <= logging.DEBUG:
+                logger.debug(f"Paper type: {paper_type}")
             
         collection = paper.get('collection', '')
         if collection:
             searchable_text += ' ' + collection * 3
-            logger.debug(f"Paper collection: {collection}")
+            if logger.level <= logging.DEBUG:
+                logger.debug(f"Paper collection: {collection}")
         
         # Add any other tags or keywords if available
         tags = paper.get('tags', [])
         if isinstance(tags, list) and tags:
             searchable_text += ' ' + ' '.join(tags) * 3
-            logger.debug(f"Paper tags: {tags}")
+            if logger.level <= logging.DEBUG:
+                logger.debug(f"Paper tags: {tags}")
         
         # Handle authors which could be in different formats
         authors = paper.get('authors', [])
@@ -173,218 +177,25 @@ class BioRxivSearcher:
                     author_text += ' ' + author
             searchable_text += ' ' + author_text
         
-        # Log all available keys in the paper object for debugging
-        logger.debug(f"Paper keys: {list(paper.keys())}")
+        # Only log paper keys in debug mode
+        if logger.level <= logging.DEBUG:
+            logger.debug(f"Paper keys: {list(paper.keys())}")
         
         return searchable_text
         
-    def search_multi_topic_papers(self, topics: List[str], require_all: bool = True, max_results: int = 5,
-                            days_back: int = 30, rank_by: str = 'date', 
-                            rank_direction: str = 'desc',
-                            rank_weights: Dict[str, float] = None) -> List[Dict[str, Any]]:
+    def search_papers(self, 
+                     topics: List[str] = None,
+                     authors: List[str] = None,
+                     topic_match: str = "all",
+                     author_match: str = "any",
+                     max_results: int = 5,
+                     days_back: int = 30,
+                     rank_by: str = 'date',
+                     rank_direction: str = 'desc',
+                     rank_weights: Dict[str, float] = None,
+                     fuzzy_match: bool = False) -> List[Dict[str, Any]]:
         """
-        Search for recent papers matching multiple topics with ranking options.
-        
-        Args:
-            topics: List of search topics
-            require_all: If True, papers must match ALL topics; if False, papers must match ANY topic
-            max_results: Maximum number of papers to return
-            days_back: Number of days to look back
-            rank_by: How to rank papers - options: 'date', 'downloads', 'abstract_views', 
-                    'altmetric', 'combined' (default: 'date')
-            rank_direction: 'asc' for ascending or 'desc' for descending (default: 'desc')
-            rank_weights: Dictionary of weights for combined ranking (default weights if None)
-            
-        Returns:
-            List of paper details including metadata and metrics
-        """
-        logger.info(f"{Fore.CYAN}Searching for recent papers on topics: {', '.join(topics)} (Match {'ALL' if require_all else 'ANY'}){Style.RESET_ALL}")
-        logger.debug(f"Date range: {(datetime.datetime.now() - datetime.timedelta(days=days_back)).strftime('%Y-%m-%d')} to {datetime.datetime.now().strftime('%Y-%m-%d')}")
-        
-        # Calculate date range
-        end_date = datetime.datetime.now().strftime("%Y-%m-%d")
-        start_date = (datetime.datetime.now() - datetime.timedelta(days=days_back)).strftime("%Y-%m-%d")
-        
-        # Structure the API request URL
-        details_url = f"{self.base_api_url}/details/biorxiv/{start_date}/{end_date}/0"
-        
-        try:
-            # Fetch papers for the date range
-            response = requests.get(details_url)
-            response.raise_for_status()
-            data = response.json()
-            
-            if 'collection' not in data or not data['collection']:
-                logger.warning(f"No papers found for the date range {start_date} to {end_date}")
-                return []
-                
-            # Filter papers based on topics
-            matching_papers = []
-            for paper in data['collection']:
-                # Get searchable text including title, abstract, authors, and category tags
-                searchable_text = self._extract_searchable_text(paper)
-                
-                # Check if paper matches topics based on require_all setting
-                topics_matched = []
-                for topic in topics:
-                    # Escape regex special characters but keep spaces for phrase matching
-                    # Convert topic to a regex pattern that matches the words in any order
-                    topic_words = topic.split()
-                    
-                    # For single-word topics, do a simple case-insensitive search
-                    if len(topic_words) == 1:
-                        pattern = re.escape(topic)
-                        if re.search(pattern, searchable_text, re.IGNORECASE):
-                            topics_matched.append(topic)
-                            continue
-                    
-                    # For multi-word topics, check if all words are present
-                    all_words_present = True
-                    for word in topic_words:
-                        # Escape special regex characters in the word
-                        escaped_word = re.escape(word)
-                        # Check if the word is in the text (as a whole word)
-                        if not re.search(r'\b' + escaped_word + r'\b', searchable_text, re.IGNORECASE):
-                            all_words_present = False
-                            break
-                    
-                    if all_words_present:
-                        topics_matched.append(topic)
-                
-                if require_all and len(topics_matched) == len(topics):
-                    # Paper matches ALL topics
-                    paper['matched_topics'] = topics_matched
-                    matching_papers.append(paper)
-                elif not require_all and topics_matched:
-                    # Paper matches ANY topic
-                    paper['matched_topics'] = topics_matched
-                    matching_papers.append(paper)
-            
-            matches_all = "all required topics" if require_all else "at least one topic"
-            if matching_papers:
-                logger.info(f"{Fore.GREEN}Found {len(matching_papers)} papers matching {matches_all}{Style.RESET_ALL}")
-            else:
-                logger.warning(f"No papers found matching {matches_all}")
-            
-            # Early return if no papers found
-            if not matching_papers:
-                return []
-                
-            # Fetch metrics for matching papers if needed for ranking
-            if rank_by in ['downloads', 'abstract_views', 'altmetric', 'combined']:
-                matching_papers = self._fetch_paper_metrics(matching_papers)
-            
-            # Sort papers based on ranking method
-            sorted_papers = self._sort_papers(matching_papers, rank_by, rank_direction, rank_weights)
-            
-            # Return the top papers based on max_results
-            return sorted_papers[:max_results]
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error searching bioRxiv: {e}")
-            return []
-        
-    def search_by_authors(self, authors: List[str], require_all: bool = False, max_results: int = 5,
-                       days_back: int = 30, rank_by: str = 'date', rank_direction: str = 'desc',
-                       rank_weights: Dict[str, float] = None) -> List[Dict[str, Any]]:
-        """
-        Search for recent papers by specific authors with ranking options.
-        
-        Args:
-            authors: List of author names to search for
-            require_all: If True, papers must match ALL authors; if False, papers must match ANY author
-            max_results: Maximum number of papers to return
-            days_back: Number of days to look back
-            rank_by: How to rank papers - options: 'date', 'downloads', 'abstract_views', 
-                    'altmetric', 'combined' (default: 'date')
-            rank_direction: 'asc' for ascending or 'desc' for descending (default: 'desc')
-            rank_weights: Dictionary of weights for combined ranking (default weights if None)
-            
-        Returns:
-            List of paper details including metadata and metrics
-        """
-        logger.info(f"{Fore.CYAN}Searching for recent papers by authors: {', '.join(authors)} (Match {'ALL' if require_all else 'ANY'}){Style.RESET_ALL}")
-        logger.debug(f"Date range: {(datetime.datetime.now() - datetime.timedelta(days=days_back)).strftime('%Y-%m-%d')} to {datetime.datetime.now().strftime('%Y-%m-%d')}")
-        
-        # Calculate date range
-        end_date = datetime.datetime.now().strftime("%Y-%m-%d")
-        start_date = (datetime.datetime.now() - datetime.timedelta(days=days_back)).strftime("%Y-%m-%d")
-        
-        # Structure the API request URL
-        details_url = f"{self.base_api_url}/details/biorxiv/{start_date}/{end_date}/0"
-        
-        try:
-            # Fetch papers for the date range
-            response = requests.get(details_url)
-            response.raise_for_status()
-            data = response.json()
-            
-            if 'collection' not in data or not data['collection']:
-                logger.warning(f"No papers found for the date range {start_date} to {end_date}")
-                return []
-                
-            # Filter papers based on authors
-            matching_papers = []
-            for paper in data['collection']:
-                # Get author information
-                paper_authors = paper.get('authors', [])
-                author_names = []
-                
-                # Extract author names from different possible formats
-                for author in paper_authors:
-                    if isinstance(author, dict):
-                        author_name = author.get('name', '')
-                        if author_name:
-                            author_names.append(author_name.lower())
-                    elif isinstance(author, str):
-                        author_names.append(author.lower())
-                
-                # Check if paper matches authors based on require_all setting
-                authors_matched = []
-                for search_author in authors:
-                    search_author_lower = search_author.lower()
-                    for author_name in author_names:
-                        if search_author_lower in author_name:
-                            authors_matched.append(search_author)
-                            break
-                
-                if require_all and len(authors_matched) == len(authors):
-                    # Paper matches ALL authors
-                    paper['matched_authors'] = authors_matched
-                    matching_papers.append(paper)
-                elif not require_all and authors_matched:
-                    # Paper matches ANY author
-                    paper['matched_authors'] = authors_matched
-                    matching_papers.append(paper)
-            
-            matches_all = "all specified authors" if require_all else "at least one author"
-            print(f"Found {len(matching_papers)} papers matching {matches_all}")
-            
-            # Early return if no papers found
-            if not matching_papers:
-                return []
-                
-            # Fetch metrics for matching papers if needed for ranking
-            if rank_by in ['downloads', 'abstract_views', 'altmetric', 'combined']:
-                matching_papers = self._fetch_paper_metrics(matching_papers)
-            
-            # Sort papers based on ranking method
-            sorted_papers = self._sort_papers(matching_papers, rank_by, rank_direction, rank_weights)
-            
-            # Return the top papers based on max_results
-            return sorted_papers[:max_results]
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error searching bioRxiv: {e}")
-            return []
-    
-    def search_combined(self, topics: List[str] = None, authors: List[str] = None, 
-                      topic_match: str = "all", author_match: str = "any",
-                      max_results: int = 5, days_back: int = 30, 
-                      rank_by: str = 'date', rank_direction: str = 'desc',
-                      rank_weights: Dict[str, float] = None) -> List[Dict[str, Any]]:
-        """
-        Search for recent papers by both topics and authors with ranking options.
+        Unified search method for bioRxiv papers with flexible filtering options.
         
         Args:
             topics: List of topics to search for (optional)
@@ -393,26 +204,28 @@ class BioRxivSearcher:
             author_match: If "all", papers must match ALL authors; if "any", papers must match ANY author
             max_results: Maximum number of papers to return
             days_back: Number of days to look back
-            rank_by: How to rank papers - options: 'date', 'downloads', 'abstract_views', 
-                    'altmetric', 'combined' (default: 'date')
-            rank_direction: 'asc' for ascending or 'desc' for descending (default: 'desc')
-            rank_weights: Dictionary of weights for combined ranking (default weights if None)
+            rank_by: How to rank papers ('date', 'downloads', 'abstract_views', 'altmetric', 'combined')
+            rank_direction: 'asc' for ascending or 'desc' for descending
+            rank_weights: Dictionary of weights for combined ranking
             
         Returns:
             List of paper details including metadata and metrics
         """
-        # Validate that at least one of topics or authors is provided
+        # Validate that at least one search parameter is provided
         if not topics and not authors:
-            print("Error: At least one topic or author must be provided")
+            logger.error("Error: At least one search parameter (topics or authors) must be provided")
             return []
             
+        # Log search criteria
         search_criteria = []
         if topics:
-            search_criteria.append(f"topics: {', '.join(topics)} (Match {topic_match.upper()})")
+            fuzzy_info = " with fuzzy matching" if fuzzy_match else ""
+            search_criteria.append(f"topics: {', '.join(topics)} (Match {topic_match.upper()}{fuzzy_info})")
         if authors:
             search_criteria.append(f"authors: {', '.join(authors)} (Match {author_match.upper()})")
             
-        print(f"Searching for recent papers matching {' AND '.join(search_criteria)}")
+        logger.info(f"{Fore.CYAN}Searching for recent papers matching {' AND '.join(search_criteria)}{Style.RESET_ALL}")
+        logger.debug(f"Date range: {(datetime.datetime.now() - datetime.timedelta(days=days_back)).strftime('%Y-%m-%d')} to {datetime.datetime.now().strftime('%Y-%m-%d')}")
         
         # Calculate date range
         end_date = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -441,25 +254,42 @@ class BioRxivSearcher:
                 if not topics:
                     matches_topic_criteria = True
                 else:
-                    # Search in title, abstract, and authors for topics
-                    searchable_text = paper.get('title', '') + ' ' + paper.get('abstract', '')
-                    
-                    # Add author text to searchable text
-                    authors_list = paper.get('authors', [])
-                    if authors_list:
-                        author_text = ''
-                        for author in authors_list:
-                            if isinstance(author, dict):
-                                author_text += ' ' + author.get('name', '')
-                            elif isinstance(author, str):
-                                author_text += ' ' + author
-                        searchable_text += author_text
+                    # Get searchable text for topic matching
+                    searchable_text = self._extract_searchable_text(paper)
                     
                     # Check if paper matches topics based on topic_match setting
                     topics_matched = []
                     for topic in topics:
-                        if re.search(topic, searchable_text, re.IGNORECASE):
-                            topics_matched.append(topic)
+                        # Handle fuzzy matching if enabled
+                        if fuzzy_match:
+                            # For fuzzy matching, we'll look for each word in the topic separately
+                            # and consider it a match if most words are found
+                            words = topic.lower().split()
+                            words_matched = 0
+                            
+                            # Count how many words from the topic are found in the searchable text
+                            for word in words:
+                                # Skip very short words (less than 3 characters)
+                                if len(word) < 3:
+                                    words_matched += 1
+                                    continue
+                                    
+                                # Remove special characters for matching
+                                clean_word = re.sub(r'[^\w\s]', '.', word)
+                                if re.search(clean_word, searchable_text.lower()):
+                                    words_matched += 1
+                            
+                            # Consider it a match if at least 70% of the words match
+                            match_threshold = 0.7
+                            if words and (words_matched / len(words) >= match_threshold):
+                                topics_matched.append(topic)
+                                if logger.level <= logging.DEBUG:
+                                    logger.debug(f"Fuzzy matched topic '{topic}' with {words_matched}/{len(words)} words")
+                        else:
+                            # Standard exact matching with regex escape
+                            escaped_topic = re.escape(topic)
+                            if re.search(escaped_topic, searchable_text, re.IGNORECASE):
+                                topics_matched.append(topic)
                     
                     if topic_match == "all" and len(topics_matched) == len(topics):
                         # Paper matches ALL topics
@@ -509,7 +339,19 @@ class BioRxivSearcher:
                 if matches_topic_criteria and matches_author_criteria:
                     matching_papers.append(paper)
             
-            print(f"Found {len(matching_papers)} papers matching the combined criteria")
+            # Prepare message about search criteria
+            matches_all = "specified criteria"
+            fuzzy_info = " (with fuzzy matching)" if fuzzy_match else ""
+            
+            if matching_papers:
+                logger.info(f"{Fore.GREEN}Found {len(matching_papers)} papers matching {matches_all}{fuzzy_info}{Style.RESET_ALL}")
+                # Only show paper categories in a summary instead of for each paper
+                if len(matching_papers) > 0 and not logger.isEnabledFor(logging.DEBUG):
+                    categories = set(paper.get('category', '') for paper in matching_papers if paper.get('category'))
+                    if categories:
+                        logger.info(f"Paper categories found: {', '.join(categories)}")
+            else:
+                logger.warning(f"No papers found matching {matches_all}{fuzzy_info}")
             
             # Early return if no papers found
             if not matching_papers:
@@ -529,9 +371,111 @@ class BioRxivSearcher:
             logger.error(f"Error searching bioRxiv: {e}")
             return []
     
+    def search_multi_topic_papers(self, topics: List[str], require_all: bool = True, max_results: int = 5,
+                            days_back: int = 30, rank_by: str = 'date', 
+                            rank_direction: str = 'desc',
+                            rank_weights: Dict[str, float] = None,
+                            fuzzy_match: bool = False) -> List[Dict[str, Any]]:
+        """
+        Search for recent papers matching multiple topics with ranking options.
+        
+        Args:
+            topics: List of search topics
+            require_all: If True, papers must match ALL topics; if False, papers must match ANY topic
+            max_results: Maximum number of papers to return
+            days_back: Number of days to look back
+            rank_by: How to rank papers - options: 'date', 'downloads', 'abstract_views', 
+                    'altmetric', 'combined' (default: 'date')
+            rank_direction: 'asc' for ascending or 'desc' for descending (default: 'desc')
+            rank_weights: Dictionary of weights for combined ranking (default weights if None)
+            
+        Returns:
+            List of paper details including metadata and metrics
+        """
+        topic_match = "all" if require_all else "any"
+        return self.search_papers(
+            topics=topics,
+            topic_match=topic_match,
+            max_results=max_results,
+            days_back=days_back,
+            rank_by=rank_by,
+            rank_direction=rank_direction,
+            rank_weights=rank_weights,
+            fuzzy_match=fuzzy_match
+        )
+        
+    def search_by_authors(self, authors: List[str], require_all: bool = False, max_results: int = 5,
+                        days_back: int = 30, rank_by: str = 'date', rank_direction: str = 'desc',
+                        rank_weights: Dict[str, float] = None,
+                        fuzzy_match: bool = False) -> List[Dict[str, Any]]:
+        """
+        Search for recent papers by specific authors with ranking options.
+        
+        Args:
+            authors: List of author names to search for
+            require_all: If True, papers must match ALL authors; if False, papers must match ANY author
+            max_results: Maximum number of papers to return
+            days_back: Number of days to look back
+            rank_by: How to rank papers - options: 'date', 'downloads', 'abstract_views', 
+                      'altmetric', 'combined' (default: 'date')
+            rank_direction: 'asc' for ascending or 'desc' for descending (default: 'desc')
+            rank_weights: Dictionary of weights for combined ranking (default weights if None)
+            
+        Returns:
+            List of paper details including metadata and metrics
+        """
+        author_match = "all" if require_all else "any"
+        return self.search_papers(
+            authors=authors,
+            author_match=author_match,
+            max_results=max_results,
+            days_back=days_back,
+            rank_by=rank_by,
+            rank_direction=rank_direction,
+            rank_weights=rank_weights,
+            fuzzy_match=fuzzy_match
+        )
+    
+    def search_combined(self, topics: List[str] = None, authors: List[str] = None, 
+                       topic_match: str = "all", author_match: str = "any",
+                       max_results: int = 5, days_back: int = 30, 
+                       rank_by: str = 'date', rank_direction: str = 'desc',
+                       rank_weights: Dict[str, float] = None,
+                       fuzzy_match: bool = False) -> List[Dict[str, Any]]:
+        """
+        Search for recent papers by both topics and authors with ranking options.
+        
+        Args:
+            topics: List of topics to search for (optional)
+            authors: List of author names to search for (optional)
+            topic_match: If "all", papers must match ALL topics; if "any", papers must match ANY topic
+            author_match: If "all", papers must match ALL authors; if "any", papers must match ANY author
+            max_results: Maximum number of papers to return
+            days_back: Number of days to look back
+            rank_by: How to rank papers - options: 'date', 'downloads', 'abstract_views', 
+                    'altmetric', 'combined' (default: 'date')
+            rank_direction: 'asc' for ascending or 'desc' for descending (default: 'desc')
+            rank_weights: Dictionary of weights for combined ranking (default weights if None)
+            
+        Returns:
+            List of paper details including metadata and metrics
+        """
+        return self.search_papers(
+            topics=topics,
+            authors=authors,
+            topic_match=topic_match,
+            author_match=author_match,
+            max_results=max_results,
+            days_back=days_back,
+            rank_by=rank_by,
+            rank_direction=rank_direction,
+            rank_weights=rank_weights,
+            fuzzy_match=fuzzy_match
+        )
+    
     def search_recent_papers(self, topic: str, max_results: int = 5, days_back: int = 30, 
-                            rank_by: str = 'date', rank_direction: str = 'desc',
-                            rank_weights: Dict[str, float] = None) -> List[Dict[str, Any]]:
+                             rank_by: str = 'date', rank_direction: str = 'desc',
+                             rank_weights: Dict[str, float] = None) -> List[Dict[str, Any]]:
         """
         Search for recent papers on a specific topic with ranking options.
         
@@ -540,72 +484,23 @@ class BioRxivSearcher:
             max_results: Maximum number of papers to return
             days_back: Number of days to look back
             rank_by: How to rank papers - options: 'date', 'downloads', 'abstract_views', 
-                     'altmetric', 'combined' (default: 'date')
+                      'altmetric', 'combined' (default: 'date')
             rank_direction: 'asc' for ascending or 'desc' for descending (default: 'desc')
             rank_weights: Dictionary of weights for combined ranking (default weights if None)
             
         Returns:
             List of paper details including metadata and metrics
         """
-        print(f"Searching for recent papers on '{topic}'...")
-        
-        # Calculate date range
-        end_date = datetime.datetime.now().strftime("%Y-%m-%d")
-        start_date = (datetime.datetime.now() - datetime.timedelta(days=days_back)).strftime("%Y-%m-%d")
-        
-        # Structure the API request URL
-        details_url = f"{self.base_api_url}/details/biorxiv/{start_date}/{end_date}/0"
-        
-        try:
-            # Fetch papers for the date range
-            response = requests.get(details_url)
-            response.raise_for_status()
-            data = response.json()
-            
-            if 'collection' not in data or not data['collection']:
-                logger.warning(f"No papers found for the date range {start_date} to {end_date}")
-                return []
-                
-            # Filter papers based on topic
-            matching_papers = []
-            for paper in data['collection']:
-                # Search in title, abstract, and authors
-                searchable_text = paper.get('title', '') + ' ' + paper.get('abstract', '')
-                
-                # Handle authors which could be in different formats
-                authors = paper.get('authors', [])
-                if authors:
-                    author_text = ''
-                    for author in authors:
-                        if isinstance(author, dict):
-                            author_text += ' ' + author.get('name', '')
-                        elif isinstance(author, str):
-                            author_text += ' ' + author
-                    searchable_text += author_text
-                
-                if re.search(topic, searchable_text, re.IGNORECASE):
-                    matching_papers.append(paper)
-            
-            print(f"Found {len(matching_papers)} papers matching topic '{topic}'")
-            
-            # Early return if no papers found
-            if not matching_papers:
-                return []
-                
-            # Fetch metrics for matching papers if needed for ranking
-            if rank_by in ['downloads', 'abstract_views', 'altmetric', 'combined']:
-                matching_papers = self._fetch_paper_metrics(matching_papers)
-            
-            # Sort papers based on ranking method
-            sorted_papers = self._sort_papers(matching_papers, rank_by, rank_direction, rank_weights)
-            
-            # Return the top papers based on max_results
-            return sorted_papers[:max_results]
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error searching bioRxiv: {e}")
-            return []
-            
+        return self.search_papers(
+            topics=[topic],
+            topic_match="any",
+            max_results=max_results,
+            days_back=days_back,
+            rank_by=rank_by,
+            rank_direction=rank_direction,
+            rank_weights=rank_weights
+        )
+    
     def _fetch_paper_metrics(self, papers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Fetch metrics for a list of papers.
@@ -740,8 +635,8 @@ class BioRxivSearcher:
             Path to the downloaded PDF, or None if download failed
         """
         try:
-            # Create output directory if it doesn't exist
-            os.makedirs(output_dir, exist_ok=True)
+            # Ensure output directory exists and is writable
+            output_dir = _ensure_output_dir(output_dir)
             
             # Extract DOI and construct PDF URL
             doi = paper.get('doi')
@@ -755,41 +650,102 @@ class BioRxivSearcher:
             # Get first author
             first_author = "Unknown"
             authors = paper.get('authors', [])
-            if authors:
-                if isinstance(authors[0], dict):
-                    first_author = authors[0].get('name', '').split()[-1]  # Get last name
-                elif isinstance(authors[0], str):
-                    first_author = authors[0].split()[-1]  # Get last name
             
+            # Enhanced author name extraction with minimal logging
+            if authors:
+                # Try multiple approaches to extract author name correctly
+                if isinstance(authors[0], dict):
+                    author_name = authors[0].get('name', '')
+                    
+                    # Handle possible name formats
+                    name_parts = author_name.split()
+                    
+                    if len(name_parts) > 1:
+                        last_name = name_parts[-1]
+                        first_initial = name_parts[0][0] if name_parts[0] else ''
+                        first_author = f"{last_name} {first_initial}"
+                    else:
+                        first_author = author_name
+                        
+                elif isinstance(authors[0], str):
+                    name_parts = authors[0].split()
+                    
+                    if len(name_parts) > 1:
+                        last_name = name_parts[-1]
+                        first_initial = name_parts[0][0] if name_parts[0] else ''
+                        first_author = f"{last_name} {first_initial}"
+                    else:
+                        first_author = authors[0]
+                        
+                # Handle other possible data structures
+                elif isinstance(authors[0], list):
+                    if authors[0] and isinstance(authors[0][0], str):
+                        name_parts = authors[0][0].split()
+                        if len(name_parts) > 1:
+                            last_name = name_parts[-1]
+                            first_initial = name_parts[0][0] if name_parts[0] else ''
+                            first_author = f"{last_name} {first_initial}"
+                else:
+                    # Try to convert to string and extract
+                    try:
+                        author_str = str(authors[0])
+                        if author_str and len(author_str) > 1:
+                            name_parts = author_str.split()
+                            if len(name_parts) > 1:
+                                last_name = name_parts[-1]
+                                first_initial = name_parts[0][0] if name_parts[0] else ''
+                                first_author = f"{last_name} {first_initial}"
+                            else:
+                                first_author = author_str
+                    except Exception as e:
+                        logger.error(f"Error extracting author name: {e}")
+        
             # Get short title (first 10 words or less)
             title = paper.get('title', 'Unknown')
             short_title = ' '.join(title.split()[:10])
             if len(title.split()) > 10:
                 short_title += "..."
-                
+            
             # Construct a sanitized filename with the requested format
             sanitized_title = re.sub(r'[^\w\s-]', '', short_title)
             sanitized_title = re.sub(r'\s+', ' ', sanitized_title).strip()
+            
+            # Ensure author name is properly formatted as "LastName FirstInitial"
             sanitized_author = re.sub(r'[^\w\s-]', '', first_author)
+            
+            # Make sure we don't have just a single letter for the author
+            if len(sanitized_author.strip()) <= 1:
+                # Try to extract a better author name from the raw author data
+                try:
+                    authors = paper.get('authors', [])
+                    if authors and isinstance(authors, list) and len(authors) > 0:
+                        # Try different approaches to get a better author name
+                        if isinstance(authors[0], dict) and 'name' in authors[0]:
+                            full_name = authors[0]['name']
+                            name_parts = full_name.split()
+                            if len(name_parts) > 1:
+                                sanitized_author = f"{name_parts[-1]} {name_parts[0][0]}"
+                except Exception as e:
+                    logger.error(f"Error extracting author name: {e}")
             
             filename = f"{paper_date} - {sanitized_author} - {sanitized_title}.pdf"
             # Remove any problematic characters for filenames
             filename = re.sub(r'[<>:"/\\|?*]', '', filename)
             filepath = os.path.join(output_dir, filename)
-            
+        
             # bioRxiv PDF URL format
             pdf_url = f"https://www.biorxiv.org/content/{doi}.full.pdf"
-            
+        
             logger.info(f"{Fore.BLUE}Downloading: {paper.get('title')}{Style.RESET_ALL}")
             logger.debug(f"PDF URL: {pdf_url}")
             response = requests.get(pdf_url, stream=True)
             response.raise_for_status()
-            
+        
             try:
                 with open(filepath, 'wb') as f:
                     for chunk in response.iter_content(chunk_size=8192):
                         f.write(chunk)
-                
+            
                 # Verify the file was downloaded correctly
                 if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
                     logger.info(f"{Fore.GREEN}Downloaded: {filepath}{Style.RESET_ALL}")
@@ -799,27 +755,52 @@ class BioRxivSearcher:
                     return None
             except Exception as e:
                 logger.error(f"Error saving PDF file: {e}")
-                logger.info("Attempting to save to fallback location...")
-                # Try saving to current directory as fallback
-                fallback_path = os.path.join(os.path.abspath('.'), filename)
-                try:
-                    with open(fallback_path, 'wb') as f:
-                        response = requests.get(pdf_url, stream=True)  # Get the content again
-                        response.raise_for_status()
-                        for chunk in response.iter_content(chunk_size=8192):
-                            f.write(chunk)
-                    logger.info(f"{Fore.GREEN}Downloaded to fallback location: {fallback_path}{Style.RESET_ALL}")
-                    return fallback_path
-                except Exception as e2:
-                    logger.error(f"Failed to download even to fallback location: {e2}")
-                    return None
-            
-        except requests.exceptions.RequestException as e:
+                logger.error(f"Attempted to save to: {filepath}")
+                return None
+        except Exception as e:
             logger.error(f"Error downloading paper: {e}")
             return None
+
+def _ensure_output_dir(output_dir: str) -> str:
+    """
+    Ensure the output directory exists and is writable.
+    Handles path conversion for better cross-platform compatibility.
+    
+    Args:
+        output_dir: Requested output directory path
+        
+    Returns:
+        Validated output directory path
+    """
+    # Convert to Path object for better path handling
+    path = Path(output_dir)
+    
+    # If it's an absolute path starting with / but not a full Windows path, make it relative
+    # This fixes the issue with paths like "/papers" being interpreted as absolute from root
+    if str(path).startswith('/') and not (len(str(path)) > 2 and str(path)[1] == ':'):
+        path = Path('.') / str(path).lstrip('/')
+        logger.warning(f"Converting absolute path to relative: {path}")
+    
+    try:
+        # Create directory if it doesn't exist
+        path.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Using output directory: {path}")
+        
+        # Test if directory is writable
+        test_file = path / '.write_test'
+        try:
+            test_file.write_text('test')
+            test_file.unlink()  # Remove test file
         except Exception as e:
-            logger.error(f"Unexpected error downloading paper: {e}")
-            return None
+            logger.error(f"Output directory is not writable: {e}")
+            logger.warning("Falling back to current directory")
+            return '.'
+    except Exception as e:
+        logger.error(f"Error creating output directory: {e}")
+        logger.warning("Falling back to current directory")
+        return '.'
+    
+    return str(path)
 
 class PaperSummarizer:
     """Class to generate summaries of scientific papers."""
@@ -897,124 +878,200 @@ class PaperSummarizer:
         Returns:
             Generated summary of the paper
         """
-        logger.info(f"{Fore.BLUE}Generating summary for: {paper_metadata.get('title', 'Unknown paper')}{Style.RESET_ALL}")
-        
-        # Extract text from PDF
-        paper_text = self.extract_text_from_pdf(pdf_path)
-        if not paper_text:
-            logger.error("Failed to extract text from the PDF.")
-            return "Failed to extract text from the PDF."
-            
-        # Prepare the prompt for the AI
-        title = paper_metadata.get('title', 'Unknown')
-        
-        # Handle authors which could be in different formats
-        author_list = []
-        for author in paper_metadata.get('authors', []):
-            if isinstance(author, dict):
-                author_name = author.get('name', '')
-                if author_name:
-                    author_list.append(author_name)
-            elif isinstance(author, str):
-                author_list.append(author)
-        authors = ', '.join(author_list)
-        
-        abstract = paper_metadata.get('abstract', 'No abstract available')
-        doi = paper_metadata.get('doi', 'Unknown')
-        date = paper_metadata.get('date', 'Unknown')
-        
-        if self.custom_prompt:
-            # Use custom prompt with placeholders replaced
-            prompt = self.custom_prompt.format(
-                title=title,
-                authors=authors,
-                abstract=abstract,
-                doi=doi,
-                date=date,
-                paper_text=paper_text[:10000]
-            )
-        else:
-            # Use default prompt
-            prompt = f"""
-            Create a comprehensive summary of the following scientific paper aimed at a first-year PhD student:
-            
-            Title: {title}
-            Authors: {authors}
-            Abstract: {abstract}
-            
-            Here's the paper text (truncated for length): 
-            {paper_text[:10000]}
-            
-            Please provide a structured summary with the following sections:
-            1. Key findings and contributions
-            2. Methodology overview
-            3. Main results and their implications
-            4. Strengths of the paper
-            5. Limitations and weaknesses
-            6. How this advances the field
-            7. Potential future research directions
-            
-            The summary should be informative, clear, and help a PhD student quickly understand the paper's value.
-            """
-        
         try:
-            # Call the API for summarization using the new OpenAI client format
-            response = self.client.chat.completions.create(
-                model=self.model,  # Use the model specified during initialization
-                messages=[
-                    {"role": "system", "content": "You are a helpful scientific assistant skilled at summarizing academic papers for PhD students."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=2000,
-                temperature=self.temperature
-            )
+            # Extract text from PDF
+            paper_text = self.extract_text_from_pdf(pdf_path)
+            if not paper_text:
+                return {"error": "extraction_failed", "message": "Failed to extract text from PDF"}
             
-            # Access the content using the new response structure
-            summary = response.choices[0].message.content
+            # Prepare metadata for prompt
+            title = paper_metadata.get('title', 'Unknown Title')
             
-            # Format the summary with metadata if custom prompt wasn't used
-            # (assumes custom prompt handles its own formatting if used)
-            if not self.custom_prompt:
-                formatted_summary = f"""
-                # Summary of "{title}"
+            # Extract authors with improved handling for various formats
+            author_list = []
+            authors_data = paper_metadata.get('authors', [])
+            
+            # Debug the author data structure
+            logger.debug(f"Author data structure: {type(authors_data)}")
+            if authors_data and len(authors_data) > 0:
+                logger.debug(f"First author type: {type(authors_data[0])}")
+                logger.debug(f"First author content: {authors_data[0]}")
+            
+            # Process authors based on their structure
+            for author in authors_data:
+                if isinstance(author, dict):
+                    # Get the full name from the dictionary
+                    author_name = author.get('name', '')
+                    if author_name:
+                        # Clean up any extra spaces or formatting issues
+                        author_name = author_name.strip()
+                        # Handle the case where the name might be a list of characters
+                        if isinstance(author_name, list):
+                            author_name = ''.join(str(c) for c in author_name if c)
+                        author_list.append(author_name)
+                elif isinstance(author, str):
+                    # Clean up any extra spaces or formatting issues
+                    author_name = author.strip()
+                    author_list.append(author_name)
+                elif isinstance(author, list):
+                    # Handle the case where the author is a list of characters
+                    author_name = ''.join(str(c) for c in author if c)
+                    if author_name:
+                        author_list.append(author_name)
+            
+            # If the author list is still empty or contains unusual characters,
+            # try a different approach by extracting author information from the paper title
+            if not author_list or all(len(a) <= 2 for a in author_list):
+                logger.warning("Author list appears to be malformed, attempting alternative extraction")
+                # Check if we can extract author information from the paper metadata in a different way
+                # For example, some papers might include author information in a different field
                 
-                **Authors:** {authors}
-                **DOI:** {paper_metadata.get('doi', 'Unknown')}
-                **Publication Date:** {paper_metadata.get('date', 'Unknown')}
+                # Try to get author information from the 'author_corresponding' field if it exists
+                corresponding_author = paper_metadata.get('author_corresponding', '')
+                if corresponding_author:
+                    if isinstance(corresponding_author, dict):
+                        author_name = corresponding_author.get('name', '')
+                        if author_name:
+                            author_list = [author_name.strip()]
+                    elif isinstance(corresponding_author, str):
+                        author_list = [corresponding_author.strip()]
                 
-                ## Original Abstract
-                {abstract}
+                # If still no valid authors, try to extract from other metadata
+                if not author_list:
+                    # Some papers might include a formatted citation that includes author names
+                    citation = paper_metadata.get('citation', '')
+                    if citation and isinstance(citation, str):
+                        # Try to extract author names from the citation
+                        # Citations often start with author names followed by the title
+                        citation_parts = citation.split('.')
+                        if len(citation_parts) > 0:
+                            potential_authors = citation_parts[0].strip()
+                            # If the potential authors section contains commas, it's likely a list of authors
+                            if ',' in potential_authors:
+                                author_list = [potential_authors]
+            
+            # Join authors with commas
+            authors_str = ', '.join(author_list)
+            
+            # If no authors were found or the string is empty, provide a default value
+            if not authors_str:
+                authors_str = 'Unknown Authors'
                 
-                {summary}
+            # Additional cleanup - remove any repeated commas, semicolons, or spaces
+            authors_str = re.sub(r',\s*,', ',', authors_str)
+            authors_str = re.sub(r';\s*;', ';', authors_str)
+            authors_str = re.sub(r'\s+', ' ', authors_str)
+            authors_str = re.sub(r',\s*$', '', authors_str)  # Remove trailing comma
+            
+            # Fix common formatting issues in author strings
+            # Replace sequences like "L, i, ," with "Li,"
+            authors_str = re.sub(r'([A-Za-z]),\s*([A-Za-z]),\s*', r'\1\2, ', authors_str)
+            # Replace sequences of single letters separated by commas with concatenated text
+            authors_str = re.sub(r'(?<=[A-Za-z]),\s*(?=[A-Za-z])\s*(?![A-Za-z]{2,})', '', authors_str)
+            
+            logger.debug(f"Processed authors: {authors_str}")
+            
+            abstract = paper_metadata.get('abstract', 'No abstract available')
+            doi = paper_metadata.get('doi', 'Unknown')
+            date = paper_metadata.get('date', 'Unknown')
+            
+            if self.custom_prompt:
+                # Create a dictionary with all possible placeholders and their default values
+                prompt_values = {
+                    'title': title,
+                    'authors': authors_str,
+                    'abstract': abstract,
+                    'doi': doi,
+                    'date': date,
+                    'paper_text': paper_text[:10000],
+                    # Add default values for other potential placeholders in custom templates
+                    'journal': 'bioRxiv (Preprint)',
+                    'impact_factor': 'N/A (Preprint)',
+                    'citation_count': 'N/A (Preprint)',
+                    'url': f"https://www.biorxiv.org/content/{doi}",
+                    'category': paper_metadata.get('category', 'Unknown Category'),
+                    'version': paper_metadata.get('version', '1'),
+                    'license': paper_metadata.get('license', 'Unknown License')
+                }
                 
-                ---
-                *This summary was generated automatically and may miss nuances of the paper.*
-                """
+                # Use custom prompt with placeholders replaced
+                # Use string.format_map with a defaultdict to handle missing placeholders
+                from collections import defaultdict
+                class DefaultDict(defaultdict):
+                    def __missing__(self, key):
+                        return f"{{placeholder '{key}' not available}}"
+                
+                # Format the prompt with all available values, using defaults for missing ones
+                prompt = self.custom_prompt.format_map(DefaultDict(lambda: "N/A", prompt_values))
             else:
-                formatted_summary = summary
-            
-            return formatted_summary
-            
-        except openai.RateLimitError as e:
-            error_msg = f"OpenAI API rate limit exceeded: {e}"
-            logger.error(f"{Fore.RED}{error_msg}{Style.RESET_ALL}")
-            return {"error": "rate_limit", "message": error_msg}
-            
-        except openai.InsufficientQuotaError as e:
-            error_msg = f"OpenAI API quota exceeded: {e}. Please check your billing details at https://platform.openai.com/account/billing."
-            logger.error(f"{Fore.RED}{error_msg}{Style.RESET_ALL}")
-            return {"error": "quota_exceeded", "message": error_msg}
-            
-        except openai.APIError as e:
-            error_msg = f"OpenAI API error: {e}"
-            logger.error(f"{Fore.RED}{error_msg}{Style.RESET_ALL}")
-            return {"error": "api_error", "message": error_msg}
-            
-        except Exception as e:
-            error_msg = f"Error generating summary: {e}"
-            logger.error(f"{Fore.RED}{error_msg}{Style.RESET_ALL}")
-            return {"error": "general", "message": error_msg}
+                # Use default prompt
+                prompt = f"""
+You are a scientific expert tasked with summarizing and analyzing a research paper from bioRxiv.
+Create a comprehensive summary that would be helpful for a researcher deciding whether to read the full paper.
 
+Paper Title: {title}
+Authors: {authors_str}
+Date: {date}
+DOI: {doi}
+
+Abstract:
+{abstract}
+
+Paper Content (truncated for length):
+{paper_text[:10000]}
+
+Please provide a structured analysis with the following sections:
+
+1. SUMMARY (2-3 paragraphs summarizing the key findings and significance)
+2. METHODOLOGY (Brief overview of the main methods used)
+3. KEY FINDINGS (Bullet points of the most important results)
+4. STRENGTHS (What the paper does well)
+5. LIMITATIONS (Potential weaknesses or areas for improvement)
+6. SIGNIFICANCE (How this advances the field)
+7. AUDIENCE (Who would benefit most from reading this paper)
+
+Your analysis should be scholarly, balanced, and insightful. Highlight both the merits and potential shortcomings of the research.
+"""
+            
+            # Call OpenAI API to generate summary
+            logger.info(f"Generating summary using {self.model} model...")
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": "You are a scientific expert specializing in analyzing and summarizing research papers."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=self.temperature,
+                    max_tokens=4000
+                )
+                summary = response.choices[0].message.content
+                
+                # Add a header with paper info
+                header = f"# Summary of: {title}\n\n"
+                header += f"**Authors:** {authors_str}  \n"
+                header += f"**DOI:** {doi}  \n"
+                header += f"**Date:** {date}  \n\n"
+                header += f"---\n\n"
+                
+                return header + summary
+                
+            except Exception as e:
+                error_message = str(e)
+                logger.error(f"Error calling OpenAI API: {error_message}")
+                
+                # Check for specific error types
+                if "quota" in error_message.lower() or "rate limit" in error_message.lower():
+                    return {"error": "quota_exceeded", "message": error_message}
+                elif "content filter" in error_message.lower():
+                    return {"error": "content_filtered", "message": error_message}
+                else:
+                    return {"error": "api_error", "message": error_message}
+                
+        except Exception as e:
+            logger.error(f"Error generating summary: {e}")
+            return {"error": "general_error", "message": str(e)}
+    
 class GoogleDriveUploader:
     """Class to upload files to Google Drive."""
     
@@ -1158,10 +1215,8 @@ class GoogleDriveUploader:
                 os.remove(temp_path)
 
 
-def main():
-    """Main function to run the workflow."""
-    
-    # Parse command line arguments
+def parse_arguments():
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Search bioRxiv for papers, summarize them, and upload to Google Drive")
     parser.add_argument("--topic", type=str, default=None, help="Topic to search for in bioRxiv")
     # Add multi-topic search options
@@ -1169,6 +1224,10 @@ def main():
                       help="Multiple topics to search for (space-separated)")
     parser.add_argument("--match", type=str, default="all", choices=["all", "any"],
                       help="Match 'all' topics (AND) or 'any' topic (OR)")
+    parser.add_argument("--fuzzy_match", action="store_true",
+                      help="Enable fuzzy matching for topics (matches similar terms and handles special characters)")
+    parser.add_argument("--topic_match", type=str, default="all", choices=["all", "any"],
+                      help="Alias for --match: Match 'all' topics (AND) or 'any' topic (OR)")
     # Add author search option
     parser.add_argument("--author", type=str, default=None,
                       help="Author name to search for (can be partial name)")
@@ -1222,12 +1281,26 @@ def main():
     parser.add_argument("--log-file", type=str, default=None,
                        help="Save logs to the specified file")
     
-    args = parser.parse_args()
-    
-    # Configure logging based on command-line arguments
+    return parser.parse_args()
+
+# Define a custom filter to exclude certain debug messages
+class PaperMetadataFilter(logging.Filter):
+    """Filter out paper metadata debug messages when in verbose mode."""
+    def filter(self, record):
+        # Filter out paper category and key messages
+        if any(x in record.getMessage() for x in ["Paper category:", "Paper type:", "Paper keys:", "Author data"]):
+            return False
+        return True
+
+def setup_logging(args):
+    """Configure logging based on command-line arguments."""
+    # Configure logging level based on command-line arguments
     if args.verbose:
         logger.setLevel(logging.DEBUG)
         console_handler.setLevel(logging.DEBUG)
+        # Add filter to exclude paper metadata messages
+        paper_filter = PaperMetadataFilter()
+        console_handler.addFilter(paper_filter)
     elif args.quiet:
         logger.setLevel(logging.WARNING)
         console_handler.setLevel(logging.WARNING)
@@ -1245,7 +1318,9 @@ def main():
     logger.info(f"{Fore.CYAN}{'='*80}{Style.RESET_ALL}")
     logger.info(f"{Fore.CYAN}BioRxiv Paper Summarizer v1.0{Style.RESET_ALL}")
     logger.info(f"{Fore.CYAN}{'='*80}{Style.RESET_ALL}")
-    
+
+def initialize_components(args):
+    """Initialize the main components needed for the workflow."""
     # Check for Altmetric API key if needed
     if args.rank_by in ['altmetric', 'combined'] and not args.altmetric_key:
         logger.warning("Altmetric API key is required for 'altmetric' or 'combined' ranking.")
@@ -1268,48 +1343,29 @@ def main():
             with open(temp_prompt_file, 'w', encoding='utf-8') as f:
                 f.write(args.prompt_string)
             custom_prompt_path = temp_prompt_file
-            print(f"Custom prompt string saved to temporary file: {temp_prompt_file}")
+            logger.info(f"Custom prompt string saved to temporary file: {temp_prompt_file}")
         except Exception as e:
-            print(f"Error creating temporary prompt file: {e}")
-            print("Using default prompt instead.")
+            logger.error(f"Error creating temporary prompt file: {e}")
+            logger.info("Using default prompt instead.")
             custom_prompt_path = None
     
-    try:
-        # Step 1: Initialize components
-        searcher = BioRxivSearcher(altmetric_api_key=args.altmetric_key)
-        summarizer = PaperSummarizer(custom_prompt_path=custom_prompt_path, temperature=args.temperature, model=args.model)
-        
-        # Create output directory if it doesn't exist (with support for nested directories)
-        try:
-            if not os.path.exists(args.output_dir):
-                os.makedirs(args.output_dir, exist_ok=True)
-                print(f"Created output directory: {args.output_dir}")
-            
-            # Verify the directory is writable
-            test_file = os.path.join(args.output_dir, '.write_test')
-            try:
-                with open(test_file, 'w') as f:
-                    f.write('test')
-                os.remove(test_file)
-            except Exception as e:
-                print(f"Warning: Output directory may not be writable: {e}")
-                print("Please check permissions or choose a different output directory.")
-        except Exception as e:
-            print(f"Error creating output directory: {e}")
-            print("Using current directory as fallback.")
-            args.output_dir = os.path.abspath('.')
-        
-        # Initialize Google Drive components only if drive_folder is specified
-        uploader = None
-        drive_folder_id = None
-        
-        if args.drive_folder is not None:
-            # Check if credentials file exists
-            if not os.path.exists(args.credentials):
-                print(f"Error: Google Drive credentials file '{args.credentials}' not found.")
-                print("Please provide a valid credentials file or use --output_dir without --drive_folder.")
-                return
-                
+    # Initialize searcher and summarizer
+    searcher = BioRxivSearcher(altmetric_api_key=args.altmetric_key)
+    summarizer = PaperSummarizer(custom_prompt_path=custom_prompt_path, temperature=args.temperature, model=args.model)
+    
+    # Ensure output directory exists and is writable
+    args.output_dir = _ensure_output_dir(args.output_dir)
+    
+    # Initialize Google Drive components only if drive_folder is specified
+    uploader = None
+    drive_folder_id = None
+    
+    if args.drive_folder is not None:
+        # Check if credentials file exists
+        if not os.path.exists(args.credentials):
+            logger.error(f"Google Drive credentials file '{args.credentials}' not found.")
+            logger.error("Please provide a valid credentials file or use --output_dir without --drive_folder.")
+        else:
             # Initialize Google Drive uploader
             uploader = GoogleDriveUploader(args.credentials)
             
@@ -1318,150 +1374,139 @@ def main():
             if not drive_folder_id:
                 folder_name = f"BioRxiv Papers - {args.topic} - {datetime.datetime.now().strftime('%Y-%m-%d')}"
                 drive_folder_id = uploader.create_folder(folder_name)
+    
+    return searcher, summarizer, uploader, drive_folder_id, rank_weights, temp_prompt_file
+
+def search_papers_based_on_args(args, searcher, rank_weights):
+    """Search for papers based on command-line arguments."""
+    # Validate that at least one search parameter is provided
+    if not args.topic and not args.topics and not args.author and not args.authors:
+        logger.error("Error: At least one search parameter (topic, topics, author, or authors) must be provided")
+        return []
+    
+    # Determine the search method based on provided arguments
+    topics_list = args.topics if args.topics else [args.topic] if args.topic else None
+    authors_list = args.authors if args.authors else [args.author] if args.author else None
+    
+    # Determine topic matching mode (use topic_match if provided, otherwise use match)
+    topic_match_mode = args.topic_match if args.topic_match != "all" else args.match
+    
+    # Use the unified search method
+    papers = searcher.search_papers(
+        topics=topics_list,
+        authors=authors_list,
+        topic_match=topic_match_mode,
+        author_match=args.author_match,
+        max_results=args.max_papers,
+        days_back=args.days,
+        rank_by=args.rank_by,
+        rank_direction=args.rank_direction,
+        rank_weights=rank_weights,
+        fuzzy_match=args.fuzzy_match
+    )
+    
+    return papers
+
+def process_papers(papers, args, summarizer, uploader=None, drive_folder_id=None):
+    """Process each paper (download, summarize, upload)."""
+    logger.info(f"{Fore.CYAN}{'='*50}{Style.RESET_ALL}")
+    logger.info(f"{Fore.CYAN}Starting to process {len(papers)} papers{Style.RESET_ALL}")
+    logger.info(f"{Fore.CYAN}{'='*50}{Style.RESET_ALL}")
+    
+    api_quota_exceeded = False  # Flag to track if we've hit API quota limits
+    
+    for i, paper in enumerate(papers, 1):
+        title = paper.get('title', 'Unknown')
+        logger.info(f"\n{Fore.CYAN}Processing paper {i}/{len(papers)}: {title}{Style.RESET_ALL}")
         
-        # Step 3: Search for papers with ranking
-        print(f"Searching and ranking papers by '{args.rank_by}' ({args.rank_direction}ending)...")
+        # Download paper
+        searcher = BioRxivSearcher()  # Create a temporary instance just for downloading
+        pdf_path = searcher.download_paper(paper, args.output_dir)
+        if not pdf_path:
+            logger.error(f"Failed to download paper: {title}")
+            continue
         
-        # Validate that at least one search parameter is provided
-        if not args.topic and not args.topics and not args.author and not args.authors:
-            logger.error("Error: At least one search parameter (topic, topics, author, or authors) must be provided")
-            return
-        
-        # Determine the search method based on provided arguments
-        if (args.topics or args.topic) and (args.authors or args.author):
-            # Combined search with both topics and authors
-            topics_list = args.topics if args.topics else [args.topic] if args.topic else None
-            authors_list = args.authors if args.authors else [args.author] if args.author else None
+        # Skip summarization if we've already hit quota limits
+        if api_quota_exceeded:
+            logger.warning("Skipping summary generation due to previously encountered API quota limits.")
+            logger.info(f"Paper downloaded to: {pdf_path}")
+            continue
             
-            papers = searcher.search_combined(
-                topics=topics_list,
-                authors=authors_list,
-                topic_match=args.match,
-                author_match=args.author_match,
-                max_results=args.max_papers,
-                days_back=args.days,
-                rank_by=args.rank_by,
-                rank_direction=args.rank_direction,
-                rank_weights=rank_weights
-            )
-        elif args.authors or args.author:
-            # Author-only search
-            authors_list = args.authors if args.authors else [args.author]
-            require_all = args.author_match == "all"
+        # Generate summary
+        summary_result = summarizer.generate_summary(pdf_path, paper)
+        
+        # Check if the result is an error dictionary
+        if isinstance(summary_result, dict) and 'error' in summary_result:
+            error_type = summary_result.get('error')
+            error_message = summary_result.get('message', 'Unknown error')
             
-            papers = searcher.search_by_authors(
-                authors=authors_list,
-                require_all=require_all,
-                max_results=args.max_papers,
-                days_back=args.days,
-                rank_by=args.rank_by,
-                rank_direction=args.rank_direction,
-                rank_weights=rank_weights
-            )
-        elif args.topics:
-            # Multi-topic search
-            require_all = args.match == "all"
-            papers = searcher.search_multi_topic_papers(
-                topics=args.topics,
-                require_all=require_all,
-                max_results=args.max_papers,
-                days_back=args.days,
-                rank_by=args.rank_by,
-                rank_direction=args.rank_direction,
-                rank_weights=rank_weights
-            )
-        else:
-            # Single topic search
-            papers = searcher.search_recent_papers(
-                topic=args.topic,
-                max_results=args.max_papers,
-                days_back=args.days,
-                rank_by=args.rank_by,
-                rank_direction=args.rank_direction,
-                rank_weights=rank_weights
-            )
-        
-        if not papers:
-            logger.warning("No papers found matching the criteria.")
-            return
-        
-        # Step 4: Process each paper
-        logger.info(f"{Fore.CYAN}{'='*50}{Style.RESET_ALL}")
-        logger.info(f"{Fore.CYAN}Starting to process {len(papers)} papers{Style.RESET_ALL}")
-        logger.info(f"{Fore.CYAN}{'='*50}{Style.RESET_ALL}")
-        
-        api_quota_exceeded = False  # Flag to track if we've hit API quota limits
-        
-        for i, paper in enumerate(papers, 1):
-            title = paper.get('title', 'Unknown')
-            logger.info(f"\n{Fore.CYAN}Processing paper {i}/{len(papers)}: {title}{Style.RESET_ALL}")
-            
-            # Download paper
-            pdf_path = searcher.download_paper(paper, args.output_dir)
-            if not pdf_path:
-                logger.error(f"Failed to download paper: {title}")
-                continue
-            
-            # Skip summarization if we've already hit quota limits
-            if api_quota_exceeded:
-                logger.warning("Skipping summary generation due to previously encountered API quota limits.")
+            # Handle quota exceeded errors specially
+            if error_type in ['quota_exceeded', 'rate_limit']:
+                api_quota_exceeded = True
+                logger.error(f"{Fore.RED}API quota or rate limit exceeded. Will download remaining papers without generating summaries.{Style.RESET_ALL}")
+                logger.error(f"Error details: {error_message}")
                 logger.info(f"Paper downloaded to: {pdf_path}")
                 continue
                 
-            # Generate summary
-            summary_result = summarizer.generate_summary(pdf_path, paper)
+            # For other errors, create a simple error summary
+            summary = f"# Summary could not be generated\n\n**Error:** {error_message}\n\nThe paper has been downloaded to: {pdf_path}"
+        else:
+            # No error, use the summary as is
+            summary = summary_result
+        
+        # Save summary to a file with the same naming format as the PDF
+        # Extract the filename without extension from pdf_path
+        pdf_filename = os.path.basename(pdf_path)
+        summary_filename = os.path.splitext(pdf_filename)[0] + ".md"
+        summary_path = os.path.join(args.output_dir, summary_filename)
+        
+        try:
+            with open(summary_path, 'w', encoding='utf-8') as f:
+                f.write(summary)
             
-            # Check if the result is an error dictionary
-            if isinstance(summary_result, dict) and 'error' in summary_result:
-                error_type = summary_result.get('error')
-                error_message = summary_result.get('message', 'Unknown error')
-                
-                # Handle quota exceeded errors specially
-                if error_type in ['quota_exceeded', 'rate_limit']:
-                    api_quota_exceeded = True
-                    logger.error(f"{Fore.RED}API quota or rate limit exceeded. Will download remaining papers without generating summaries.{Style.RESET_ALL}")
-                    logger.error(f"Error details: {error_message}")
-                    logger.info(f"Paper downloaded to: {pdf_path}")
-                    continue
-                    
-                # For other errors, create a simple error summary
-                summary = f"# Summary could not be generated\n\n**Error:** {error_message}\n\nThe paper has been downloaded to: {pdf_path}"
+            # Verify the file was actually created
+            if os.path.exists(summary_path) and os.path.getsize(summary_path) > 0:
+                logger.info(f"{Fore.GREEN}Saved summary to: {summary_path}{Style.RESET_ALL}")
             else:
-                # No error, use the summary as is
-                summary = summary_result
-            
-            # Save summary to a file with the same naming format as the PDF
-            # Extract the filename without extension from pdf_path
-            pdf_filename = os.path.basename(pdf_path)
-            summary_filename = os.path.splitext(pdf_filename)[0] + ".md"
-            summary_path = os.path.join(args.output_dir, summary_filename)
-            
+                logger.warning(f"Summary file was created but appears to be empty or missing: {summary_path}")
+        except Exception as e:
+            logger.error(f"Error saving summary file: {e}")
+            logger.error(f"Attempted to save to: {summary_path}")
+            # Try saving to current directory as fallback
+            fallback_path = os.path.join(os.path.abspath('.'), summary_filename)
             try:
-                with open(summary_path, 'w', encoding='utf-8') as f:
+                with open(fallback_path, 'w', encoding='utf-8') as f:
                     f.write(summary)
-                
-                # Verify the file was actually created
-                if os.path.exists(summary_path) and os.path.getsize(summary_path) > 0:
-                    logger.info(f"{Fore.GREEN}Saved summary to: {summary_path}{Style.RESET_ALL}")
-                else:
-                    logger.warning(f"Summary file was created but appears to be empty or missing: {summary_path}")
-            except Exception as e:
-                logger.error(f"Error saving summary file: {e}")
-                logger.error(f"Attempted to save to: {summary_path}")
-                # Try saving to current directory as fallback
-                fallback_path = os.path.join(os.path.abspath('.'), summary_filename)
-                try:
-                    with open(fallback_path, 'w', encoding='utf-8') as f:
-                        f.write(summary)
-                    logger.info(f"{Fore.GREEN}Saved summary to fallback location: {fallback_path}{Style.RESET_ALL}")
-                    summary_path = fallback_path  # Update path for Google Drive upload
-                except Exception as e2:
-                    logger.error(f"Failed to save summary even to fallback location: {e2}")
-            
-            # Upload the paper and its summary to Google Drive if using Google Drive
-            if uploader and drive_folder_id:
-                uploader.upload_file(pdf_path, drive_folder_id)
-                uploader.upload_file(summary_path, drive_folder_id)
+                logger.info(f"{Fore.GREEN}Saved summary to fallback location: {fallback_path}{Style.RESET_ALL}")
+                summary_path = fallback_path  # Update path for Google Drive upload
+            except Exception as e2:
+                logger.error(f"Failed to save summary even to fallback location: {e2}")
+        
+        # Upload the paper and its summary to Google Drive if using Google Drive
+        if uploader and drive_folder_id:
+            uploader.upload_file(pdf_path, drive_folder_id)
+            uploader.upload_file(summary_path, drive_folder_id)
+
+def main():
+    """Main function to run the workflow."""
+    # Parse arguments
+    args = parse_arguments()
+    
+    # Setup logging
+    setup_logging(args)
+    
+    # Initialize components
+    searcher, summarizer, uploader, drive_folder_id, rank_weights, temp_prompt_file = initialize_components(args)
+    
+    try:
+        # Search for papers
+        papers = search_papers_based_on_args(args, searcher, rank_weights)
+        
+        # Process papers
+        if papers:
+            process_papers(papers, args, summarizer, uploader, drive_folder_id)
+        else:
+            logger.warning("No papers found matching the criteria.")
         
         logger.info(f"\n{Fore.GREEN}{'='*50}{Style.RESET_ALL}")
         logger.info(f"{Fore.GREEN}Workflow complete!{Style.RESET_ALL}")
@@ -1472,10 +1517,9 @@ def main():
         if temp_prompt_file and os.path.exists(temp_prompt_file):
             try:
                 os.remove(temp_prompt_file)
-                print(f"Temporary prompt file removed: {temp_prompt_file}")
+                logger.info(f"Temporary prompt file removed: {temp_prompt_file}")
             except Exception as e:
-                print(f"Warning: Could not remove temporary prompt file {temp_prompt_file}: {e}")
+                logger.warning(f"Could not remove temporary prompt file {temp_prompt_file}: {e}")
 
 if __name__ == "__main__":
     main()
-    
