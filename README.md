@@ -9,6 +9,7 @@ This tool automates the workflow for researchers to:
 ## Table of Contents
 - [Requirements](#requirements)
 - [Installation](#installation)
+- [Entry Points and Execution Options](#entry-points-and-execution-options)
 - [Using Podman Container](#using-podman-container)
 - [API Configuration](#api-configuration)
 - [Basic Usage](#basic-usage)
@@ -45,7 +46,26 @@ This tool automates the workflow for researchers to:
 
 ## Installation
 
-1. Install the required Python packages:
+You can install the package in two ways:
+
+### Option 1: Install from source
+
+1. Clone the repository:
+
+```bash
+git clone <repository-url>
+cd biorxiv_summarizer
+```
+
+2. Install the package in development mode:
+
+```bash
+pip install -e .
+```
+
+### Option 2: Install dependencies only
+
+If you prefer not to install the package, you can just install the dependencies:
 
 ```bash
 pip install -r requirements.txt
@@ -60,9 +80,37 @@ The requirements include:
 - python-dotenv
 - PyPDF2
 
+## Entry Points and Execution Options
+
+There are multiple ways to run the BioRxiv Summarizer, depending on your preferences and environment:
+
+### Option 1: Direct Script Execution
+You can run the main script directly without installation:
+
+```bash
+python main.py --topic "your search topic"
+```
+
+This approach works in any environment where you have the required dependencies installed.
+
+### Option 2: Package Installation
+Install the package to get access to the command-line tool:
+
+```bash
+pip install -e .
+```
+
+After installation, you can use the command-line tool from anywhere:
+
+```bash
+biorxiv-summarizer --topic "your search topic"
+```
+
+This is the most convenient option for regular use, as it makes the tool available system-wide.
+
 ## Using Podman Container
 
-If you prefer to run the tool in a container environment, you can use Podman. This approach ensures consistent behavior across different systems and simplifies dependency management.
+The Podman container exists primarily to ensure environment stability and reproducibility. It's not required to use the tool, but it provides a consistent environment with all dependencies pre-installed.
 
 ### Setting Up Podman Container
 
@@ -111,8 +159,23 @@ nano /app/biorxiv_summarizer.py
 
 3. Run the script with your changes:
 
+(Not recommended)
 ```bash
 python /app/biorxiv_summarizer.py --topic "CRISPR" --output_dir /data
+```
+
+or
+
+(Recommended, installed with pip install -e .)
+```bash
+biorxiv-summarizer --topic "CRISPR" --output_dir /data
+```
+
+or
+
+(Not installed with pip install -e .)
+```bash
+python main.py --topic "CRISPR" --output_dir /data
 ```
 
 ## API Configuration
@@ -129,7 +192,12 @@ Alternatively, you can pass the API key directly via environment variable:
 
 ```bash
 export OPENAI_API_KEY=your_api_key_here
-python biorxiv_summarizer.py [options]
+
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer [options]
+
+# Alternative (without installation)
+python main.py [options]
 ```
 
 ### Altmetric API (Optional)
@@ -143,7 +211,11 @@ python biorxiv_summarizer.py [options]
 Or pass it via command line:
 
 ```bash
-python biorxiv_summarizer.py --altmetric_key your_altmetric_key_here [other options]
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --altmetric_key your_altmetric_key_here [other options]
+
+# Alternative (without installation)
+python main.py --altmetric_key your_altmetric_key_here [other options]
 ```
 
 ### Google Drive API (Optional)
@@ -167,6 +239,13 @@ python biorxiv_summarizer.py --altmetric_key your_altmetric_key_here [other opti
 The simplest way to use the tool is:
 
 ```bash
+# If installed as a package
+biorxiv-summarizer --topic "your search topic"
+
+# Or using the main.py script
+python main.py --topic "your search topic"
+
+# Or using the original script (still works but not recommended)
 python biorxiv_summarizer.py --topic "your search topic"
 ```
 
@@ -184,18 +263,30 @@ You can search using either a single topic or multiple topics:
 
 **Single Topic Search:**
 ```bash
-python biorxiv_summarizer.py --topic "CRISPR"
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "CRISPR"
+
+# Alternative (without installation)
+python main.py --topic "CRISPR"
 ```
 
 **Multiple Topics Search:**
 ```bash
-python biorxiv_summarizer.py --topics "CRISPR" "gene editing" "off-target effects"
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topics "CRISPR" "gene editing" "off-target effects"
+
+# Alternative (without installation)
+python main.py --topics "CRISPR" "gene editing" "off-target effects"
 ```
 
 By default, papers must match ALL specified topics. You can change this behavior:
 
 ```bash
-python biorxiv_summarizer.py --topics "CRISPR" "gene editing" "off-target effects" --match any
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topics "CRISPR" "gene editing" "off-target effects" --match any
+
+# Alternative (without installation)
+python main.py --topics "CRISPR" "gene editing" "off-target effects" --match any
 ```
 
 This will return papers that match ANY of the specified topics.
@@ -205,7 +296,11 @@ This will return papers that match ANY of the specified topics.
 Control how many papers and from what time period:
 
 ```bash
-python biorxiv_summarizer.py --topic "genomics" --max_papers 10 --days 60
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "genomics" --max_papers 10 --days 60
+
+# Alternative (without installation)
+python main.py --topic "genomics" --max_papers 10 --days 60
 ```
 
 This searches for papers published in the last 60 days and returns up to 10 results.
@@ -215,7 +310,11 @@ This searches for papers published in the last 60 days and returns up to 10 resu
 The tool provides several ways to rank the search results:
 
 ```bash
-python biorxiv_summarizer.py --topic "neuroscience" --rank_by downloads
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "neuroscience" --rank_by downloads
+
+# Alternative (without installation)
+python main.py --topic "neuroscience" --rank_by downloads
 ```
 
 Available ranking methods:
@@ -228,13 +327,22 @@ Available ranking methods:
 You can also specify the ranking direction:
 
 ```bash
-python biorxiv_summarizer.py --topic "COVID-19" --rank_by downloads --rank_direction asc
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "COVID-19" --rank_by downloads --rank_direction asc
+
+# Alternative (without installation)
+python main.py --topic "COVID-19" --rank_by downloads --rank_direction asc
 ```
 
 For combined ranking, you can customize the weights:
 
 ```bash
-python biorxiv_summarizer.py --topic "neuroscience" --rank_by combined \
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "neuroscience" --rank_by combined \
+  --weight_downloads 0.3 --weight_views 0.1 --weight_altmetric 0.5 --weight_twitter 0.1
+
+# Alternative (without installation)
+python main.py --topic "neuroscience" --rank_by combined \
   --weight_downloads 0.3 --weight_views 0.1 --weight_altmetric 0.5 --weight_twitter 0.1
 ```
 
@@ -245,7 +353,11 @@ python biorxiv_summarizer.py --topic "neuroscience" --rank_by combined \
 By default, papers and summaries are saved to a directory named "papers" in the current working directory. You can specify a different directory:
 
 ```bash
-python biorxiv_summarizer.py --topic "immunology" --output_dir "/path/to/your/directory"
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "immunology" --output_dir "/path/to/your/directory"
+
+# Alternative (without installation)
+python main.py --topic "immunology" --output_dir "/path/to/your/directory"
 ```
 
 Files are named with this format: `{date} - {first_author} - {short_title}.pdf` and `{date} - {first_author} - {short_title}.md` for the summary.
@@ -255,7 +367,11 @@ Files are named with this format: `{date} - {first_author} - {short_title}.pdf` 
 To save papers and summaries to Google Drive:
 
 ```bash
-python biorxiv_summarizer.py --topic "epigenetics" --credentials "credentials.json"
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "epigenetics" --credentials "credentials.json"
+
+# Alternative (without installation)
+python main.py --topic "epigenetics" --credentials "credentials.json"
 ```
 
 This will:
@@ -266,7 +382,12 @@ This will:
 You can also specify an existing Google Drive folder:
 
 ```bash
-python biorxiv_summarizer.py --topic "proteomics" --credentials "credentials.json" \
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "proteomics" --credentials "credentials.json" \
+  --drive_folder "your_folder_id_here"
+
+# Alternative (without installation)
+python main.py --topic "proteomics" --credentials "credentials.json" \
   --drive_folder "your_folder_id_here"
 ```
 
@@ -278,12 +399,20 @@ You can customize how papers are summarized in two ways:
 
 **1. File-based prompt:**
 ```bash
-python biorxiv_summarizer.py --topic "CRISPR" --custom_prompt "scientific_paper_prompt.md"
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "CRISPR" --custom_prompt "scientific_paper_prompt.md"
+
+# Alternative (without installation)
+python main.py --topic "CRISPR" --custom_prompt "scientific_paper_prompt.md"
 ```
 
 **2. Command-line prompt:**
 ```bash
-python biorxiv_summarizer.py --topic "genomics" --prompt_string "Analyze the paper {title} by {authors}. Focus on methodological strengths and weaknesses."
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "genomics" --prompt_string "Analyze the paper {title} by {authors}. Focus on methodological strengths and weaknesses."
+
+# Alternative (without installation)
+python main.py --topic "genomics" --prompt_string "Analyze the paper {title} by {authors}. Focus on methodological strengths and weaknesses."
 ```
 
 ### Available Placeholders
@@ -370,7 +499,13 @@ Please identify:
 Get the most impactful papers on a topic, with custom summary format:
 
 ```bash
-python biorxiv_summarizer.py --topics "single cell RNA-seq" "spatial transcriptomics" \
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topics "single cell RNA-seq" "spatial transcriptomics" \
+  --rank_by combined --max_papers 10 --days 90 \
+  --custom_prompt "literature_review_template.md"
+
+# Alternative (without installation)
+python main.py --topics "single cell RNA-seq" "spatial transcriptomics" \
   --rank_by combined --max_papers 10 --days 90 \
   --custom_prompt "literature_review_template.md"
 ```
@@ -380,7 +515,12 @@ python biorxiv_summarizer.py --topics "single cell RNA-seq" "spatial transcripto
 Find the most downloaded papers on a topic and generate student-friendly summaries:
 
 ```bash
-python biorxiv_summarizer.py --topic "genome editing" --rank_by downloads \
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "genome editing" --rank_by downloads \
+  --max_papers 5 --prompt_string "Create a beginner-friendly explanation of {title} for undergraduate students. Explain key concepts, significance, and implications."
+
+# Alternative (without installation)
+python main.py --topic "genome editing" --rank_by downloads \
   --max_papers 5 --prompt_string "Create a beginner-friendly explanation of {title} for undergraduate students. Explain key concepts, significance, and implications."
 ```
 
@@ -389,7 +529,12 @@ python biorxiv_summarizer.py --topic "genome editing" --rank_by downloads \
 For thorough analysis, you might run the tool with different models:
 
 ```bash
-python biorxiv_summarizer.py --topic "protein structure prediction" --rank_by date \
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "protein structure prediction" --rank_by date \
+  --model "gpt-4" --custom_prompt "expert_analysis.md"
+
+# Alternative (without installation)
+python main.py --topic "protein structure prediction" --rank_by date \
   --model "gpt-4" --custom_prompt "expert_analysis.md"
 ```
 
@@ -411,16 +556,28 @@ If you're not getting results, try these approaches:
 
 ```bash
 # Use broader or fewer terms
-python biorxiv_summarizer.py --topics "transcriptomics" --max_papers 1 --days 60
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topics "transcriptomics" --max_papers 1 --days 60
+# Alternative (without installation)
+python main.py --topics "transcriptomics" --max_papers 1 --days 60
 
 # Use ANY matching instead of ALL
-python biorxiv_summarizer.py --topics "Computational Biology" "Bioinformatics" "Single-Cell Transcriptomics" --topic_match any --max_papers 1 --days 60
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topics "Computational Biology" "Bioinformatics" "Single-Cell Transcriptomics" --topic_match any --max_papers 1 --days 60
+# Alternative (without installation)
+python main.py --topics "Computational Biology" "Bioinformatics" "Single-Cell Transcriptomics" --topic_match any --max_papers 1 --days 60
 
 # Increase the search window
-python biorxiv_summarizer.py --topics "Computational Biology" --days 90 --max_papers 5
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topics "Computational Biology" --days 90 --max_papers 5
+# Alternative (without installation)
+python main.py --topics "Computational Biology" --days 90 --max_papers 5
 
 # Use fuzzy matching (matches similar terms)
-python biorxiv_summarizer.py --topics "RNA-seq" --fuzzy_match --max_papers 5
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topics "RNA-seq" --fuzzy_match --max_papers 5
+# Alternative (without installation)
+python main.py --topics "RNA-seq" --fuzzy_match --max_papers 5
 ```
 
 #### What text is being searched when I provide topics?
@@ -469,10 +626,16 @@ If you're getting too many papers that aren't relevant to your interests, try:
 
 ```bash
 # Combine multiple specific topics with ALL matching
-python biorxiv_summarizer.py --topics "CRISPR" "gene therapy" "clinical trials" --topic_match all
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topics "CRISPR" "gene therapy" "clinical trials" --topic_match all
+# Alternative (without installation)
+python main.py --topics "CRISPR" "gene therapy" "clinical trials" --topic_match all
 
 # Combine topic and author search
-python biorxiv_summarizer.py --topics "CRISPR" --authors "Zhang F" --days 90
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topics "CRISPR" --authors "Zhang F" --days 90
+# Alternative (without installation)
+python main.py --topics "CRISPR" --authors "Zhang F" --days 90
 ```
 
 ## Troubleshooting
@@ -518,7 +681,11 @@ You can now search for papers by author name in addition to searching by topic:
 Search for papers by a specific author:
 
 ```bash
-python biorxiv_summarizer.py --author "Smith" --max_papers 3
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --author "Smith" --max_papers 3
+
+# Alternative (without installation)
+python main.py --author "Smith" --max_papers 3
 ``` 
 
 ### Multiple Authors
@@ -526,13 +693,21 @@ python biorxiv_summarizer.py --author "Smith" --max_papers 3
 Search for papers by multiple authors:
 
 ```bash
-python biorxiv_summarizer.py --authors "Smith" "Johnson" "Lee" --max_papers 5
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --authors "Smith" "Johnson" "Lee" --max_papers 5
+
+# Alternative (without installation)
+python main.py --authors "Smith" "Johnson" "Lee" --max_papers 5
 ```
 
 By default, papers matching ANY of the specified authors will be returned. To require ALL authors:
 
 ```bash
-python biorxiv_summarizer.py --authors "Smith" "Johnson" --author_match all
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --authors "Smith" "Johnson" --author_match all
+
+# Alternative (without installation)
+python main.py --authors "Smith" "Johnson" --author_match all
 ```
 
 ### Combined Topic and Author Search
@@ -540,13 +715,21 @@ python biorxiv_summarizer.py --authors "Smith" "Johnson" --author_match all
 You can combine topic and author search to find papers that match both criteria:
 
 ```bash
-python biorxiv_summarizer.py --topic "genomics" --author "Smith"
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "genomics" --author "Smith"
+
+# Alternative (without installation)
+python main.py --topic "genomics" --author "Smith"
 ```
 
 Or with multiple topics and authors:
 
 ```bash
-python biorxiv_summarizer.py --topics "CRISPR" "gene editing" --authors "Zhang" "Doudna" --match any --author_match any
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topics "CRISPR" "gene editing" --authors "Zhang" "Doudna" --match any --author_match any
+
+# Alternative (without installation)
+python main.py --topics "CRISPR" "gene editing" --authors "Zhang" "Doudna" --match any --author_match any
 ```
 
 In combined searches:
@@ -563,13 +746,22 @@ Control the verbosity of the output:
 
 ```bash
 # Normal output (default)
-python biorxiv_summarizer.py --topic "genomics"
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "genomics"
+# Alternative (without installation)
+python main.py --topic "genomics"
 
 # Verbose output with detailed information
-python biorxiv_summarizer.py --topic "genomics" --verbose
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "genomics" --verbose
+# Alternative (without installation)
+python main.py --topic "genomics" --verbose
 
 # Quiet mode (only warnings and errors)
-python biorxiv_summarizer.py --topic "genomics" --quiet
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "genomics" --quiet
+# Alternative (without installation)
+python main.py --topic "genomics" --quiet
 ```
 
 ### Log to File
@@ -577,7 +769,11 @@ python biorxiv_summarizer.py --topic "genomics" --quiet
 Save all logs to a file for later review:
 
 ```bash
-python biorxiv_summarizer.py --topic "genomics" --log-file "biorxiv_search.log"
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "genomics" --log-file "biorxiv_search.log"
+
+# Alternative (without installation)
+python main.py --topic "genomics" --log-file "biorxiv_search.log"
 ```
 
 The log file will contain all log messages, regardless of the console verbosity level.
