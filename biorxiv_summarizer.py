@@ -125,6 +125,59 @@ class BioRxivSearcher:
         self.altmetric_api_key = altmetric_api_key
         self.altmetric_base_url = "https://api.altmetric.com/v1"
     
+    def _extract_searchable_text(self, paper: Dict[str, Any]) -> str:
+        """Extract searchable text from a paper including title, abstract, authors, and category.
+        
+        Args:
+            paper: Paper metadata dictionary
+            
+        Returns:
+            String containing all searchable text from the paper
+        """
+        # Start with title and abstract
+        searchable_text = paper.get('title', '') + ' ' + paper.get('abstract', '')
+        
+        # Add category/subject tags to searchable text with higher weight (repeat them)
+        # bioRxiv uses 'category' field for the subject area
+        category = paper.get('category', '')
+        if category:
+            # Add category multiple times to give it more weight in the search
+            searchable_text += ' ' + category * 5  # Increased weight for categories
+            logger.debug(f"Paper category: {category}")
+        
+        # Some papers might have 'type' or 'collection' fields that indicate the subject area
+        paper_type = paper.get('type', '')
+        if paper_type:
+            searchable_text += ' ' + paper_type * 3
+            logger.debug(f"Paper type: {paper_type}")
+            
+        collection = paper.get('collection', '')
+        if collection:
+            searchable_text += ' ' + collection * 3
+            logger.debug(f"Paper collection: {collection}")
+        
+        # Add any other tags or keywords if available
+        tags = paper.get('tags', [])
+        if isinstance(tags, list) and tags:
+            searchable_text += ' ' + ' '.join(tags) * 3
+            logger.debug(f"Paper tags: {tags}")
+        
+        # Handle authors which could be in different formats
+        authors = paper.get('authors', [])
+        if authors:
+            author_text = ''
+            for author in authors:
+                if isinstance(author, dict):
+                    author_text += ' ' + author.get('name', '')
+                elif isinstance(author, str):
+                    author_text += ' ' + author
+            searchable_text += ' ' + author_text
+        
+        # Log all available keys in the paper object for debugging
+        logger.debug(f"Paper keys: {list(paper.keys())}")
+        
+        return searchable_text
+        
     def search_multi_topic_papers(self, topics: List[str], require_all: bool = True, max_results: int = 5,
                             days_back: int = 30, rank_by: str = 'date', 
                             rank_direction: str = 'desc',
@@ -168,24 +221,34 @@ class BioRxivSearcher:
             # Filter papers based on topics
             matching_papers = []
             for paper in data['collection']:
-                # Search in title, abstract, and authors
-                searchable_text = paper.get('title', '') + ' ' + paper.get('abstract', '')
-                
-                # Handle authors which could be in different formats
-                authors = paper.get('authors', [])
-                if authors:
-                    author_text = ''
-                    for author in authors:
-                        if isinstance(author, dict):
-                            author_text += ' ' + author.get('name', '')
-                        elif isinstance(author, str):
-                            author_text += ' ' + author
-                    searchable_text += author_text
+                # Get searchable text including title, abstract, authors, and category tags
+                searchable_text = self._extract_searchable_text(paper)
                 
                 # Check if paper matches topics based on require_all setting
                 topics_matched = []
                 for topic in topics:
-                    if re.search(topic, searchable_text, re.IGNORECASE):
+                    # Escape regex special characters but keep spaces for phrase matching
+                    # Convert topic to a regex pattern that matches the words in any order
+                    topic_words = topic.split()
+                    
+                    # For single-word topics, do a simple case-insensitive search
+                    if len(topic_words) == 1:
+                        pattern = re.escape(topic)
+                        if re.search(pattern, searchable_text, re.IGNORECASE):
+                            topics_matched.append(topic)
+                            continue
+                    
+                    # For multi-word topics, check if all words are present
+                    all_words_present = True
+                    for word in topic_words:
+                        # Escape special regex characters in the word
+                        escaped_word = re.escape(word)
+                        # Check if the word is in the text (as a whole word)
+                        if not re.search(r'\b' + escaped_word + r'\b', searchable_text, re.IGNORECASE):
+                            all_words_present = False
+                            break
+                    
+                    if all_words_present:
                         topics_matched.append(topic)
                 
                 if require_all and len(topics_matched) == len(topics):
@@ -240,7 +303,8 @@ class BioRxivSearcher:
         Returns:
             List of paper details including metadata and metrics
         """
-        print(f"Searching for recent papers by authors: {', '.join(authors)} (Match {'ALL' if require_all else 'ANY'})")
+        logger.info(f"{Fore.CYAN}Searching for recent papers by authors: {', '.join(authors)} (Match {'ALL' if require_all else 'ANY'}){Style.RESET_ALL}")
+        logger.debug(f"Date range: {(datetime.datetime.now() - datetime.timedelta(days=days_back)).strftime('%Y-%m-%d')} to {datetime.datetime.now().strftime('%Y-%m-%d')}")
         
         # Calculate date range
         end_date = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -1146,9 +1210,9 @@ def main():
     # Add OpenAI API options
     parser.add_argument("--temperature", type=float, default=0.2,
                        help="Temperature setting for OpenAI API (0.0-1.0). Lower values make output more focused and deterministic, higher values make output more random (default: 0.2)")
-    parser.add_argument("--model", type=str, default="gpt-3.5-turbo",
-                       choices=["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo", "gpt-4o"],
-                       help="OpenAI model to use for summarization (default: gpt-3.5-turbo)")
+    parser.add_argument("--model", type=str, default="gpt-4o-mini",
+                       choices=["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo", "gpt-4o", "gpt-4o-mini"],
+                       help="OpenAI model to use for summarization (default: gpt-4o-mini)")
     
     # Add logging options
     parser.add_argument("--verbose", "-v", action="store_true",
