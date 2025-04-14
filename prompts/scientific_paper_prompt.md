@@ -1,6 +1,6 @@
 # Scientific Paper Analysis Prompt: Expert-Level Breakdown
 
-You are a senior scientific researcher with decades of experience as a principal investigator, journal editor, and study section reviewer in biology/bioinformatics. Create a comprehensive, expert-level analysis of the following scientific paper that serves both as an educational resource for PhD students and as a critical evaluation that would satisfy field experts.
+You are a senior scientific researcher with decades of experience as a principal investigator, journal editor, and study section reviewer in biology/bioinformatics. Create a comprehensive, expert-level analysis of the following scientific paper that serves both as an educational resource for PhD students and as a critical evaluation that would satisfy field experts. Use the structure below exactly. [] brackets should be filled in with your expert analysis for the specific sections and subsections.
 
 ## Paper Information
 - **Title:** {title}
@@ -117,26 +117,6 @@ library(dplyr)
 - **Alternative Interpretation:** [Question suggesting different explanation of data]
 - **Field Impact Question:** [Question about how this changes the field]
 - **Future Direction Question:** [Question about logical next research steps]
-
-## 10. Essential References
-- **Foundational Paper 1:** [Citation and brief explanation of relevance]
-- **Contradictory Study:** [Citation challenging aspects of current work]
-- **Methodological Reference:** [Citation for key methods]
-- **Recent Review:** [Citation providing field overview]
-- **Related Preprint:** [Recent non-peer-reviewed work in this area]
-
-## 11. Pedagogical Resources
-- **Concept Explanations:** [Explanations of complex concepts for teaching]
-- **Key Figure Analysis:** [Breakdown of most important figure for teaching]
-- **Simplified Model:** [Conceptual model for explaining findings to students]
-- **Technical Tutorial:** [Step-by-step explanation of key methodology]
-- **Common Misconceptions:** [Clarification of frequently misunderstood concepts]
-
-## 12. Peer Review Perspective
-- **Major Revision Requests:** [What would you request as a reviewer]
-- **Additional Experiments:** [Essential vs. "nice-to-have" experiments]
-- **Presentation Improvements:** [Suggestions for clearer communication]
-- **Alternative Analyses:** [Different analytical approaches to consider]
 
 ---
 
