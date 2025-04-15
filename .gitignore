@@ -6,3 +6,4 @@ token.json
 papers/
 *.pdf
 *.log
+biorxiv-summarizer.tar

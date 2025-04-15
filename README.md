@@ -122,6 +122,14 @@ podman build -t biorxiv-summarizer .
 
 2. Run the container with volume mounts to access your local filesystem:
 
+Quick launch of the container:
+
+```bash
+podman run -it --rm -v $(pwd):/app biorxiv-summarizer
+```
+
+For more advanced usage, you can also run the container with additional volume mounts:
+
 ```bash
 podman run -it --rm \
   -v $(pwd):/app \
