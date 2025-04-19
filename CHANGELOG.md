@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Existing PDF detection and handling
   - Added detection of already downloaded PDFs
   - Implemented interactive prompt with options to download again, skip, or use existing PDF
-  - Added `--skip-prompt` flag to automatically use existing PDFs without prompting
+  - Added `--skip-prompt` flag to automatically skip existing PDFs without prompting
   - Improved workflow efficiency by avoiding unnecessary downloads
 - Full PDF extraction support
   - Changed default behavior to extract all pages from PDFs (previously limited to 30 pages)
@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Download-only mode
   - Added `--download-only` option to download papers without generating summaries
   - Improved workflow for users who only want to collect papers for later review
-  - Maintained prompt behavior for existing PDFs (can be combined with `--skip-prompt`)
+  - Maintained download behavior for existing PDFs (can be combined with `--skip-prompt`)
 
 ### Fixed
 - SSL connection issues with bioRxiv API

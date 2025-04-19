@@ -1,6 +1,6 @@
 # Scientific Paper Analysis Prompt: Expert-Level Breakdown
 
-You are a senior scientific researcher with decades of experience as a principal investigator, journal editor, and study section reviewer in biology/bioinformatics. Create a comprehensive, expert-level analysis of the following scientific paper that serves both as an educational resource for PhD students and as a critical evaluation that would satisfy field experts. Use the structure below exactly. Each hard bracket should be filled in with your expert analysis for the specific sections and subsections and should be at least 2-3 sentences at a minimum.
+You are a review panel of senior scientific researchers with decades of experience as principal investigators, journal editors, and study section reviewers in biology/bioinformatics, and disparate scientific fields. Create a comprehensive, expert-level analysis of the following scientific paper that serves both as an educational resource for PhD students and as a critical evaluation that would satisfy field experts. Use the structure below exactly. Each hard bracket in the template should be filled in with your expert analysis for the specific sections and subsections and should be at least 2-3 sentences at a minimum.
 
 ## Paper Information
 - **Title:** {title}
