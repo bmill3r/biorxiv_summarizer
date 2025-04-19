@@ -838,4 +838,92 @@ python main.py --topic "genomics" --disable-ssl-verify --bypass-api
 ```
 
 ## Advanced Usage Examples
+
+Here are some advanced usage examples that combine multiple features:
+
+### Downloading Papers Only with Automatic Skipping
+
+Download papers without generating summaries and automatically skip papers that already exist:
+
+```bash
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "CRISPR" --download-only --skip-prompt
+
+# Alternative (without installation)
+python main.py --topic "CRISPR" --download-only --skip-prompt
+```
+
+### Comprehensive Search with Custom Output
+
+Search for papers on multiple topics with fuzzy matching, rank by combined metrics, and save to a custom directory:
+
+```bash
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topics "Machine Learning" "Genomics" --topic-match any --fuzzy-match \
+  --rank-by combined --weight-altmetric 0.5 --weight-downloads 0.3 --output-dir "./ml_genomics_papers"
+
+# Alternative (without installation)
+python main.py --topics "Machine Learning" "Genomics" --topic-match any --fuzzy-match \
+  --rank-by combined --weight-altmetric 0.5 --weight-downloads 0.3 --output-dir "./ml_genomics_papers"
+```
+
+### Author-Specific Search with Download-Only Mode
+
+Search for papers by specific authors in the last 90 days and download them without generating summaries:
+
+```bash
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --authors "Zhang J" "Wang L" --author-match any --days 90 --download-only
+
+# Alternative (without installation)
+python main.py --authors "Zhang J" "Wang L" --author-match any --days 90 --download-only
+```
+
+### Combined Author and Topic Search with Custom Model
+
+Search for papers that match both author and topic criteria, using a specific model for summarization:
+
+```bash
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "Proteomics" --author "Smith J" --model "gpt-4o" --temperature 0.3
+
+# Alternative (without installation)
+python main.py --topic "Proteomics" --author "Smith J" --model "gpt-4o" --temperature 0.3
+```
+
+### Using Anthropic API with Download-Only Mode for Initial Collection
+
+First collect papers without summaries, then later generate summaries using Anthropic's Claude model:
+
+```bash
+# Step 1: Collect papers only (if installed with pip install -e .)
+biorxiv-summarizer --topic "Single-cell RNA-seq" --days 60 --download-only
+
+# Step 2: Later, generate summaries with Claude (if installed with pip install -e .)
+biorxiv-summarizer --topic "Single-cell RNA-seq" --days 60 --api-provider anthropic \
+  --model "claude-3-opus-20240229" --skip-prompt
+
+# Alternative (without installation)
+# Step 1
+python main.py --topic "Single-cell RNA-seq" --days 60 --download-only
+# Step 2
+python main.py --topic "Single-cell RNA-seq" --days 60 --api-provider anthropic \
+  --model "claude-3-opus-20240229" --skip-prompt
+```
+
+### Maximum Reliability Mode
+
+For situations with unreliable connections, use a combination of reliability options:
+
+```bash
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "Neuroscience" --bypass-api --disable-ssl-verify \
+  --download-only --skip-prompt --verbose --log-file "neuroscience_papers.log"
+
+# Alternative (without installation)
+python main.py --topic "Neuroscience" --bypass-api --disable-ssl-verify \
+  --download-only --skip-prompt --verbose --log-file "neuroscience_papers.log"
+```
+
+## PDF Processing Options
 {{ ... }}
