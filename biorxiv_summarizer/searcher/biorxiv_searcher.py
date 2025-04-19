@@ -10,6 +10,11 @@ import re
 import requests
 import datetime
 import logging
+import time
+import json
+from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from typing import List, Dict, Any, Tuple, Optional
 from colorama import Fore, Style
 
@@ -21,16 +26,40 @@ logger = logging.getLogger('biorxiv_summarizer')
 class BioRxivSearcher:
     """Class to search and retrieve papers from bioRxiv."""
     
-    def __init__(self, altmetric_api_key=None):
+    def __init__(self, altmetric_api_key=None, verify_ssl=True, bypass_api=False):
         """
         Initialize the bioRxiv searcher.
         
         Args:
             altmetric_api_key: API key for Altmetric (optional)
+            verify_ssl: Whether to verify SSL certificates (default: True)
+            bypass_api: Whether to bypass the API and use web scraping directly (default: False)
         """
         self.base_api_url = "https://api.biorxiv.org"
         self.altmetric_api_key = altmetric_api_key
         self.altmetric_base_url = "https://api.altmetric.com/v1"
+        self.verify_ssl = verify_ssl
+        self.bypass_api = bypass_api
+        
+        if bypass_api:
+            logger.info(f"{Fore.YELLOW}API bypass enabled. Using web scraping directly instead of the bioRxiv API.{Style.RESET_ALL}")
+        
+        if not verify_ssl:
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            logger.warning(f"{Fore.YELLOW}SSL verification disabled. This is not recommended for production use.{Style.RESET_ALL}")
+        
+        # Configure session with retry mechanism
+        self.session = requests.Session()
+        retry_strategy = Retry(
+            total=2,  # Maximum number of retries
+            backoff_factor=1,  # Time factor between retries
+            status_forcelist=[429, 500, 502, 503, 504],  # HTTP status codes to retry on
+            allowed_methods=["GET"],  # HTTP methods to retry
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
     
     def _extract_searchable_text(self, paper: Dict[str, Any]) -> str:
         """Extract searchable text from a paper including title, abstract, authors, and category.
@@ -134,6 +163,11 @@ class BioRxivSearcher:
         logger.info(f"{Fore.CYAN}Searching for recent papers matching {' AND '.join(search_criteria)}{Style.RESET_ALL}")
         logger.debug(f"Date range: {(datetime.datetime.now() - datetime.timedelta(days=days_back)).strftime('%Y-%m-%d')} to {datetime.datetime.now().strftime('%Y-%m-%d')}")
         
+        # If API bypass is enabled, go straight to the fallback method
+        if self.bypass_api:
+            logger.info(f"{Fore.YELLOW}API bypass enabled. Using web scraping directly.{Style.RESET_ALL}")
+            return self._search_papers_fallback(topics, authors, topic_match, author_match, max_results, days_back, rank_by, rank_direction, rank_weights, fuzzy_match)
+        
         # Calculate date range
         end_date = datetime.datetime.now().strftime("%Y-%m-%d")
         start_date = (datetime.datetime.now() - datetime.timedelta(days=days_back)).strftime("%Y-%m-%d")
@@ -142,10 +176,22 @@ class BioRxivSearcher:
         details_url = f"{self.base_api_url}/details/biorxiv/{start_date}/{end_date}/0"
         
         try:
-            # Fetch papers for the date range
-            response = requests.get(details_url)
-            response.raise_for_status()
-            data = response.json()
+            # Fetch papers for the date range with timeout and retry
+            for attempt in range(2):  # Try up to 2 times
+                try:
+                    logger.debug(f"API request attempt {attempt+1} to {details_url}")
+                    response = self.session.get(details_url, timeout=30, verify=self.verify_ssl)  # 30 second timeout
+                    response.raise_for_status()
+                    data = response.json()
+                    break  # Success, exit the retry loop
+                except (requests.exceptions.RequestException, requests.exceptions.JSONDecodeError) as e:
+                    if attempt < 1:  # If not the last attempt
+                        logger.warning(f"API request attempt {attempt+1} failed: {e}. Retrying...")
+                        time.sleep(2)  # Wait before retrying
+                    else:
+                        # Last attempt failed, try the fallback method
+                        logger.warning(f"All API request attempts failed. Trying fallback method...")
+                        return self._search_papers_fallback(topics, authors, topic_match, author_match, max_results, days_back, rank_by, rank_direction, rank_weights, fuzzy_match)
             
             if 'collection' not in data or not data['collection']:
                 logger.warning(f"No papers found for the date range {start_date} to {end_date}")
@@ -278,11 +324,262 @@ class BioRxivSearcher:
             logger.error(f"Error searching bioRxiv: {e}")
             return []
     
+    def _search_papers_fallback(self, 
+                              topics: List[str] = None,
+                              authors: List[str] = None,
+                              topic_match: str = "all",
+                              author_match: str = "any",
+                              max_results: int = 5,
+                              days_back: int = 30,
+                              rank_by: str = 'date',
+                              rank_direction: str = 'desc',
+                              rank_weights: Dict[str, float] = None,
+                              fuzzy_match: bool = False) -> List[Dict[str, Any]]:
+        """
+        Fallback method to search bioRxiv papers using the website directly instead of the API.
+        This is used when the API connection fails.
+        """
+        logger.info(f"{Fore.YELLOW}Using fallback method to search bioRxiv website directly{Style.RESET_ALL}")
+        
+        # Calculate date range for filtering
+        end_date = datetime.datetime.now()
+        start_date = end_date - datetime.timedelta(days=days_back)
+        
+        # Format dates for logging
+        start_date_str = start_date.strftime("%Y-%m-%d")
+        end_date_str = end_date.strftime("%Y-%m-%d")
+        logger.info(f"Date range: {start_date_str} to {end_date_str}")
+        
+        # Construct search query for bioRxiv website
+        search_terms = []
+        if topics:
+            search_terms.extend(topics)
+        if authors:
+            search_terms.extend([f"author:{author}" for author in authors])
+            
+        search_query = " ".join(search_terms)
+        
+        # Add date filtering to the search URL if possible
+        # bioRxiv website supports date filtering with format: jcode:biorxiv date_from:YYYY-MM-DD date_to:YYYY-MM-DD
+        search_query += f" jcode:biorxiv date_from:{start_date_str} date_to:{end_date_str}"
+        
+        # Format the search URL for bioRxiv website
+        search_url = f"https://www.biorxiv.org/search/{search_query}"
+        
+        try:
+            # Fetch search results from bioRxiv website
+            logger.debug(f"Fallback search URL: {search_url}")
+            
+            # Add user-agent header to mimic a browser
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            
+            response = self.session.get(search_url, timeout=30, verify=self.verify_ssl, headers=headers)
+            response.raise_for_status()
+            
+            # Parse the HTML response
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Extract paper information from search results
+            papers = []
+            for result in soup.select('.highwire-article-citation'):
+                try:
+                    # Extract paper details
+                    title_elem = result.select_one('.highwire-cite-title')
+                    title = title_elem.text.strip() if title_elem else "Unknown Title"
+                    
+                    # Extract DOI and paper ID from the link
+                    doi = None
+                    paper_id = None
+                    pdf_url = None
+                    link_elem = title_elem.find('a') if title_elem else None
+                    if link_elem and 'href' in link_elem.attrs:
+                        href = link_elem['href']
+                        logger.debug(f"Found paper link: {href}")
+                        
+                        # Store the original href for later use with PDF download
+                        original_href = href
+                        
+                        # Try to extract paper ID and DOI using different patterns
+                        # Pattern 1: Standard bioRxiv DOI format with complete identifier
+                        doi_match = re.search(r'10\.1101/([\d\.]+(?:v\d+)?)', href)
+                        if doi_match:
+                            paper_id = doi_match.group(1)  # The complete paper identifier
+                            doi = f"10.1101/{paper_id}"
+                            logger.debug(f"Extracted DOI: {doi} and paper ID: {paper_id} from href: {href}")
+                        else:
+                            # Pattern 2: URL path format with complete identifier
+                            path_match = re.search(r'/content/(?:early/)?(\d+\.\d+\.\d+\.\d+(?:v\d+)?)', href)
+                            if path_match:
+                                paper_id = path_match.group(1)
+                                doi = f"10.1101/{paper_id}"
+                                logger.debug(f"Extracted paper ID: {paper_id} from path: {href}")
+                            else:
+                                # Pattern 3: Try to extract from content path with year and month format
+                                year_month_match = re.search(r'/content/(?:early/)?(\d{4}\.\d{2}\.\d{2}\.\d+(?:v\d+)?)', href)
+                                if year_month_match:
+                                    paper_id = year_month_match.group(1)
+                                    doi = f"10.1101/{paper_id}"
+                                    logger.debug(f"Extracted paper ID with year/month: {paper_id} from path: {href}")
+                                else:
+                                    # If we can't extract DOI or paper ID, log it
+                                    logger.debug(f"Could not extract DOI or paper ID from href: {href}")
+                        
+                        # Construct direct PDF URL if we have the original href
+                        if href.startswith('/'):
+                            # Convert relative URL to absolute
+                            href = f"https://www.biorxiv.org{href}"
+                        
+                        # Store the content URL for later PDF construction
+                        content_url = href
+                        
+                        # If the URL ends with a file extension, remove it to get the base URL
+                        if '.' in href.split('/')[-1]:
+                            content_url = re.sub(r'\.[^.]+$', '', href)
+                        
+                        # For bioRxiv URLs, ensure we have the correct format for PDF download
+                        if paper_id and 'biorxiv.org' in content_url:
+                            # Construct PDF URL with the complete paper identifier
+                            pdf_url = f"https://www.biorxiv.org/content/10.1101/{paper_id}.full.pdf"
+                            logger.debug(f"Constructed bioRxiv PDF URL: {pdf_url}")
+                        else:
+                            # Fallback to appending .full.pdf to the content URL
+                            pdf_url = f"{content_url}.full.pdf"
+                            logger.debug(f"Constructed generic PDF URL: {pdf_url}")
+                    
+                    # Extract authors
+                    author_elems = result.select('.highwire-citation-author')
+                    authors = [author.text.strip() for author in author_elems]
+                    
+                    # Extract abstract
+                    abstract_elem = result.select_one('.highwire-cite-snippet')
+                    abstract = abstract_elem.text.strip() if abstract_elem else ""
+                    
+                    # Extract date
+                    date_elem = result.select_one('.highwire-cite-metadata-date')
+                    date_str = date_elem.text.strip() if date_elem else ""
+                    pub_date = None
+                    if date_str:
+                        try:
+                            # Parse date in format like "January 1, 2025"
+                            pub_date = datetime.datetime.strptime(date_str, "%B %d, %Y").strftime("%Y-%m-%d")
+                        except ValueError:
+                            try:
+                                # Try alternative date formats
+                                # Format like "Jan 1, 2025"
+                                pub_date = datetime.datetime.strptime(date_str, "%b %d, %Y").strftime("%Y-%m-%d")
+                            except ValueError:
+                                try:
+                                    # Format like "2025-01-01"
+                                    pub_date = datetime.datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d")
+                                except ValueError:
+                                    # If all parsing attempts fail, extract year and use January 1st of that year
+                                    year_match = re.search(r'(\d{4})', date_str)
+                                    if year_match:
+                                        year = year_match.group(1)
+                                        pub_date = f"{year}-01-01"
+                                        logger.debug(f"Extracted year {year} from date string: {date_str}")
+                                    else:
+                                        # If we can't even extract a year, use current date
+                                        pub_date = datetime.datetime.now().strftime("%Y-%m-%d")
+                                        logger.debug(f"Could not parse date string: {date_str}, using current date")
+                    
+                    # Extract date from paper ID if available
+                    paper_date = None
+                    if paper_id:
+                        paper_date = self._extract_date_from_paper_id(paper_id)
+                        if paper_date:
+                            logger.debug(f"Extracted date {paper_date} from paper ID: {paper_id}")
+                    
+                    # Create paper object
+                    paper = {
+                        'title': title,
+                        'doi': doi,
+                        'authors': [{'name': author} for author in authors],
+                        'abstract': abstract,
+                        'date': pub_date,
+                        'source': 'fallback',
+                        'pdf_url': pdf_url  # Store the PDF URL for direct access later
+                    }
+                    
+                    # If we have a date from the paper ID but no pub_date, use it
+                    if not pub_date and paper_id:
+                        paper_date = self._extract_date_from_paper_id(paper_id)
+                        if paper_date:
+                            paper['date'] = paper_date
+                            logger.debug(f"Using date {paper_date} extracted from paper ID")
+                    
+                    # Filter by date if we have a valid date
+                    if paper_date:
+                        paper_date = datetime.datetime.strptime(paper_date, "%Y-%m-%d")
+                        # Strict date filtering to ensure papers are within the specified range
+                        if start_date <= paper_date <= end_date:
+                            papers.append(paper)
+                            logger.debug(f"Paper date {paper_date} is within range {start_date_str} to {end_date_str}")
+                        else:
+                            logger.debug(f"Paper date {paper_date} is outside range {start_date_str} to {end_date_str}, skipping")
+                    else:
+                        # If we can't determine date, include it anyway but log a warning
+                        logger.warning(f"Could not determine date for paper: {title}. Including it anyway.")
+                        papers.append(paper)
+                        
+                except Exception as e:
+                    logger.error(f"Error parsing paper from fallback search: {e}")
+            
+            # Sort papers by date if we have dates
+            if papers:
+                # Sort papers by date (most recent first)
+                papers_with_dates = [p for p in papers if p.get('date')]
+                papers_without_dates = [p for p in papers if not p.get('date')]
+                
+                if papers_with_dates:
+                    papers_with_dates.sort(key=lambda p: datetime.datetime.strptime(p.get('date', ''), "%Y-%m-%d"), reverse=True)
+                
+                # Combine sorted papers with those without dates
+                papers = papers_with_dates + papers_without_dates
+            
+            logger.info(f"{Fore.GREEN}Found {len(papers)} papers using fallback search method{Style.RESET_ALL}")
+            
+            # Return the top papers based on max_results
+            return papers[:max_results]
+            
+        except Exception as e:
+            logger.error(f"Fallback search method failed: {e}")
+            return []
+    
+    def _extract_date_from_paper_id(self, paper_id: str) -> Optional[str]:
+        """
+        Extract and format date from a bioRxiv paper ID.
+        
+        Args:
+            paper_id: The paper ID, e.g., '2025.04.01.646202v1'
+            
+        Returns:
+            Formatted date string (YYYY-MM-DD) or None if no date could be extracted
+        """
+        if not paper_id:
+            return None
+            
+        # Try to extract date in format YYYY.MM.DD from paper ID
+        date_match = re.match(r'^(\d{4})\.(\d{2})\.(\d{2})\.', paper_id)
+        if date_match:
+            year, month, day = date_match.groups()
+            try:
+                # Validate the date
+                datetime.date(int(year), int(month), int(day))
+                return f"{year}-{month}-{day}"
+            except ValueError:
+                logger.debug(f"Invalid date components in paper ID: {paper_id}")
+                return None
+                
+        return None
+    
     def search_multi_topic_papers(self, topics: List[str], require_all: bool = True, max_results: int = 5,
-                            days_back: int = 30, rank_by: str = 'date', 
-                            rank_direction: str = 'desc',
-                            rank_weights: Dict[str, float] = None,
-                            fuzzy_match: bool = False) -> List[Dict[str, Any]]:
+                             days_back: int = 30, rank_by: str = 'date', 
+                             rank_direction: str = 'desc',
+                             rank_weights: Dict[str, float] = None,
+                             fuzzy_match: bool = False) -> List[Dict[str, Any]]:
         """
         Search for recent papers matching multiple topics with ranking options.
         
@@ -291,8 +588,8 @@ class BioRxivSearcher:
             require_all: If True, papers must match ALL topics; if False, papers must match ANY topic
             max_results: Maximum number of papers to return
             days_back: Number of days to look back
-            rank_by: How to rank papers - options: 'date', 'downloads', 'abstract_views', 
-                    'altmetric', 'combined' (default: 'date')
+            rank_by: How to rank papers ('date', 'downloads', 'abstract_views', 
+                    'altmetric', 'combined') (default: 'date')
             rank_direction: 'asc' for ascending or 'desc' for descending (default: 'desc')
             rank_weights: Dictionary of weights for combined ranking (default weights if None)
             
@@ -408,6 +705,98 @@ class BioRxivSearcher:
             rank_weights=rank_weights
         )
     
+    def _sort_papers(self, papers: List[Dict[str, Any]], rank_by: str, 
+                    rank_direction: str, rank_weights: Dict[str, float] = None) -> List[Dict[str, Any]]:
+        """
+        Sort papers based on specified ranking method.
+        
+        Args:
+            papers: List of paper details with metrics
+            rank_by: Ranking method
+            rank_direction: 'asc' or 'desc'
+            rank_weights: Weights for combined ranking
+            
+        Returns:
+            Sorted list of papers
+        """
+        # Determine sort direction
+        reverse = rank_direction.lower() == 'desc'
+        
+        # Default weights for combined ranking
+        if rank_by == 'combined' and not rank_weights:
+            rank_weights = {
+                'pdf_downloads': 0.4,
+                'abstract_views': 0.3,
+                'altmetric_score': 0.2,
+                'twitter_count': 0.1
+            }
+            
+        if rank_by == 'date':
+            # Sort by publication date with safe handling of missing or invalid dates
+            def safe_date_key(paper):
+                date_str = paper.get('date')
+                if not date_str:
+                    # Use a very old date for missing dates when sorting in descending order (newest first)
+                    # or a future date when sorting in ascending order (oldest first)
+                    return datetime.datetime(1970, 1, 1) if reverse else datetime.datetime(2100, 1, 1)
+                try:
+                    return datetime.datetime.strptime(date_str, "%Y-%m-%d")
+                except (ValueError, TypeError):
+                    # If date string is invalid, use a default date
+                    logger.warning(f"Invalid date format: {date_str}, using default date for sorting")
+                    return datetime.datetime(1970, 1, 1) if reverse else datetime.datetime(2100, 1, 1)
+            
+            return sorted(papers, key=safe_date_key, reverse=reverse)
+                         
+        elif rank_by == 'downloads':
+            # Sort by download count
+            return sorted(papers, 
+                         key=lambda x: int(x.get('downloads', 0)), 
+                         reverse=reverse)
+                         
+        elif rank_by == 'abstract_views':
+            # Sort by abstract views
+            return sorted(papers, 
+                         key=lambda x: int(x.get('abstract_views', 0)), 
+                         reverse=reverse)
+                         
+        elif rank_by == 'altmetric':
+            # Sort by Altmetric score
+            return sorted(papers, 
+                         key=lambda x: int(x.get('altmetric_score', 0)), 
+                         reverse=reverse)
+                         
+        elif rank_by == 'combined':
+            # Sort by combined weighted score
+            def combined_score(paper):
+                metrics = paper.get('metrics', {})
+                score = 0
+                for metric, weight in rank_weights.items():
+                    score += metrics.get(metric, 0) * weight
+                return score
+                
+            return sorted(papers, key=combined_score, reverse=reverse)
+            
+        else:
+            # Default to date if invalid ranking method
+            logger.warning(f"Invalid ranking method '{rank_by}'. Using 'date' instead.")
+            
+            # Sort by publication date with safe handling of missing or invalid dates
+            def safe_date_key(paper):
+                date_str = paper.get('date')
+                if not date_str:
+                    # Use a very old date for missing dates when sorting in descending order (newest first)
+                    # or a future date when sorting in ascending order (oldest first)
+                    return datetime.datetime(1970, 1, 1) if reverse else datetime.datetime(2100, 1, 1)
+                try:
+                    return datetime.datetime.strptime(date_str, "%Y-%m-%d")
+                except (ValueError, TypeError):
+                    # If date string is invalid, use a default date
+                    logger.warning(f"Invalid date format: {date_str}, using default date for sorting")
+                    return datetime.datetime(1970, 1, 1) if reverse else datetime.datetime(2100, 1, 1)
+            
+            return sorted(papers, key=safe_date_key, reverse=reverse)
+    
     def _fetch_paper_metrics(self, papers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Fetch metrics for a list of papers.
@@ -461,96 +850,47 @@ class BioRxivSearcher:
         
         return papers
     
-    def _sort_papers(self, papers: List[Dict[str, Any]], rank_by: str, 
-                    rank_direction: str, rank_weights: Dict[str, float] = None) -> List[Dict[str, Any]]:
-        """
-        Sort papers based on specified ranking method.
-        
-        Args:
-            papers: List of paper details with metrics
-            rank_by: Ranking method
-            rank_direction: 'asc' or 'desc'
-            rank_weights: Weights for combined ranking
-            
-        Returns:
-            Sorted list of papers
-        """
-        # Default weights for combined ranking
-        default_weights = {
-            'pdf_downloads': 0.4,
-            'abstract_views': 0.2,
-            'altmetric_score': 0.3,
-            'twitter_count': 0.1
-        }
-        
-        weights = rank_weights if rank_weights else default_weights
-        
-        # Create a reverse flag for sorting
-        reverse = (rank_direction == 'desc')
-        
-        if rank_by == 'date':
-            # Sort by publication date
-            return sorted(papers, 
-                         key=lambda x: datetime.datetime.strptime(x.get('date', '1970-01-01'), "%Y-%m-%d"), 
-                         reverse=reverse)
-                         
-        elif rank_by == 'downloads':
-            # Sort by PDF downloads
-            return sorted(papers, 
-                         key=lambda x: x.get('metrics', {}).get('pdf_downloads', 0), 
-                         reverse=reverse)
-                         
-        elif rank_by == 'abstract_views':
-            # Sort by abstract views
-            return sorted(papers, 
-                         key=lambda x: x.get('metrics', {}).get('abstract_views', 0), 
-                         reverse=reverse)
-                         
-        elif rank_by == 'altmetric':
-            # Sort by Altmetric score
-            return sorted(papers, 
-                         key=lambda x: x.get('metrics', {}).get('altmetric_score', 0), 
-                         reverse=reverse)
-                         
-        elif rank_by == 'combined':
-            # Sort by combined weighted score
-            def combined_score(paper):
-                metrics = paper.get('metrics', {})
-                score = 0
-                for metric, weight in weights.items():
-                    score += metrics.get(metric, 0) * weight
-                return score
-                
-            return sorted(papers, key=combined_score, reverse=reverse)
-            
-        else:
-            # Default to date if invalid ranking method
-            print(f"Warning: Invalid ranking method '{rank_by}'. Using 'date' instead.")
-            return sorted(papers, 
-                         key=lambda x: datetime.datetime.strptime(x.get('date', '1970-01-01'), "%Y-%m-%d"), 
-                         reverse=reverse)
-    
-    def download_paper(self, paper: Dict[str, Any], output_dir: str) -> Optional[str]:
+    def download_paper(self, paper: Dict[str, Any], output_dir: str, skip_prompt: bool = False) -> Optional[str]:
         """
         Download a paper as PDF.
         
         Args:
             paper: Paper metadata from the API
             output_dir: Directory to save the PDF
+            skip_prompt: If True, will overwrite existing files without prompting
             
         Returns:
             Path to the downloaded PDF, or None if download failed
+            If the file already exists and user chooses to skip, returns the path with a "skipped" flag
         """
         try:
-            # Ensure output directory exists and is writable
+            # Ensure output directory exists
             output_dir = ensure_output_dir(output_dir)
             
-            # Extract DOI and construct PDF URL
+            # Extract paper ID from DOI if available
+            paper_id = None
             doi = paper.get('doi')
-            if not doi:
-                print(f"Missing DOI for paper: {paper.get('title', 'Unknown')}")
+            if doi:
+                # Use a more comprehensive regex to extract the complete paper identifier
+                doi_match = re.search(r'10\.1101/([\d\.]+(?:v\d+)?)', doi)
+                if doi_match:
+                    paper_id = doi_match.group(1)
+                    logger.debug(f"Extracted paper ID from DOI: {paper_id}")
+            
+            # Simplified URL construction - just use the direct URL or construct one standard URL
+            direct_pdf_url = paper.get('pdf_url')
+            pdf_url = None
+            
+            if direct_pdf_url:
+                pdf_url = direct_pdf_url
+                logger.debug(f"Using direct PDF URL from fallback search: {pdf_url}")
+            elif paper_id:
+                pdf_url = f"https://www.biorxiv.org/content/10.1101/{paper_id}.full.pdf"
+                logger.debug(f"Using standard bioRxiv PDF URL: {pdf_url}")
+            else:
+                logger.error("No valid PDF URL could be constructed")
                 return None
-                
+            
             # Get paper date in YYYY-MM-DD format
             paper_date = paper.get('date', datetime.datetime.now().strftime('%Y-%m-%d'))
             
@@ -568,30 +908,24 @@ class BioRxivSearcher:
                     name_parts = author_name.split()
                     
                     if len(name_parts) > 1:
-                        last_name = name_parts[-1]
-                        first_initial = name_parts[0][0] if name_parts[0] else ''
-                        first_author = f"{last_name} {first_initial}"
+                        sanitized_author = f"{name_parts[-1]} {name_parts[0][0]}"
                     else:
-                        first_author = author_name
-                        
+                        sanitized_author = author_name
+                    
                 elif isinstance(authors[0], str):
                     name_parts = authors[0].split()
                     
                     if len(name_parts) > 1:
-                        last_name = name_parts[-1]
-                        first_initial = name_parts[0][0] if name_parts[0] else ''
-                        first_author = f"{last_name} {first_initial}"
+                        sanitized_author = f"{name_parts[-1]} {name_parts[0][0]}"
                     else:
-                        first_author = authors[0]
-                        
+                        sanitized_author = authors[0]
+                    
                 # Handle other possible data structures
                 elif isinstance(authors[0], list):
                     if authors[0] and isinstance(authors[0][0], str):
                         name_parts = authors[0][0].split()
                         if len(name_parts) > 1:
-                            last_name = name_parts[-1]
-                            first_initial = name_parts[0][0] if name_parts[0] else ''
-                            first_author = f"{last_name} {first_initial}"
+                            sanitized_author = f"{name_parts[-1]} {name_parts[0][0]}"
                 else:
                     # Try to convert to string and extract
                     try:
@@ -599,14 +933,12 @@ class BioRxivSearcher:
                         if author_str and len(author_str) > 1:
                             name_parts = author_str.split()
                             if len(name_parts) > 1:
-                                last_name = name_parts[-1]
-                                first_initial = name_parts[0][0] if name_parts[0] else ''
-                                first_author = f"{last_name} {first_initial}"
+                                sanitized_author = f"{name_parts[-1]} {name_parts[0][0]}"
                             else:
-                                first_author = author_str
+                                sanitized_author = author_str
                     except Exception as e:
                         logger.error(f"Error extracting author name: {e}")
-        
+    
             # Get short title (first 10 words or less)
             title = paper.get('title', 'Unknown')
             short_title = ' '.join(title.split()[:10])
@@ -618,7 +950,7 @@ class BioRxivSearcher:
             sanitized_title = re.sub(r'\s+', ' ', sanitized_title).strip()
             
             # Ensure author name is properly formatted as "LastName FirstInitial"
-            sanitized_author = re.sub(r'[^\w\s-]', '', first_author)
+            sanitized_author = re.sub(r'[^\w\s-]', '', sanitized_author)
             
             # Make sure we don't have just a single letter for the author
             if len(sanitized_author.strip()) <= 1:
@@ -630,40 +962,83 @@ class BioRxivSearcher:
                         if isinstance(authors[0], dict) and 'name' in authors[0]:
                             full_name = authors[0]['name']
                             name_parts = full_name.split()
+                            
                             if len(name_parts) > 1:
                                 sanitized_author = f"{name_parts[-1]} {name_parts[0][0]}"
                 except Exception as e:
                     logger.error(f"Error extracting author name: {e}")
-            
+        
             filename = f"{paper_date} - {sanitized_author} - {sanitized_title}.pdf"
             # Remove any problematic characters for filenames
             filename = re.sub(r'[<>:"/\\|?*]', '', filename)
             filepath = os.path.join(output_dir, filename)
-        
-            # bioRxiv PDF URL format
-            pdf_url = f"https://www.biorxiv.org/content/{doi}.full.pdf"
-        
+            
+            # Check if the file already exists
+            if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                logger.info(f"{Fore.YELLOW}PDF already exists: {filepath}{Style.RESET_ALL}")
+                
+                # If skip_prompt is True, just return the existing file path with a flag
+                if skip_prompt:
+                    return f"{filepath}|skipped"
+                
+                # Ask user what to do
+                while True:
+                    choice = input(f"\n{Fore.YELLOW}Paper already downloaded. What would you like to do?{Style.RESET_ALL}\n"
+                                  f"[d]ownload again, [s]kip this paper, [c]ontinue with existing PDF: ").lower()
+                    
+                    if choice == 'd':
+                        logger.info(f"Re-downloading paper...")
+                        break
+                    elif choice == 's':
+                        logger.info(f"Skipping paper...")
+                        return f"{filepath}|skipped"
+                    elif choice == 'c':
+                        logger.info(f"Using existing PDF...")
+                        return filepath
+                    else:
+                        print(f"{Fore.RED}Invalid choice. Please try again.{Style.RESET_ALL}")
+            
             logger.info(f"{Fore.BLUE}Downloading: {paper.get('title')}{Style.RESET_ALL}")
-            logger.debug(f"PDF URL: {pdf_url}")
-            response = requests.get(pdf_url, stream=True)
-            response.raise_for_status()
-        
+            
+            # Add user-agent header to mimic a browser
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Referer': 'https://www.biorxiv.org/',
+                'Accept': 'application/pdf, text/html, */*'
+            }
+            
+            # Try to download the PDF
             try:
+                logger.debug(f"Downloading from {pdf_url}")
+                response = self.session.get(pdf_url, stream=True, headers=headers, verify=self.verify_ssl, timeout=30)
+                response.raise_for_status()
+                
+                # Check if the response is actually a PDF
+                content_type = response.headers.get('Content-Type', '')
+                if 'application/pdf' not in content_type and 'pdf' not in content_type.lower():
+                    logger.warning(f"Response is not a PDF (Content-Type: {content_type})")
+                    if len(response.content) < 1000:  # Small response is likely an error page
+                        logger.error(f"Response content too small, likely an error page")
+                        return None
+                
+                # Save the PDF
                 with open(filepath, 'wb') as f:
                     for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
-            
+                        if chunk:
+                            f.write(chunk)
+                
                 # Verify the file was downloaded correctly
                 if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-                    logger.info(f"{Fore.GREEN}Downloaded: {filepath}{Style.RESET_ALL}")
+                    logger.info(f"{Fore.GREEN}Downloaded paper to: {filepath}{Style.RESET_ALL}")
                     return filepath
                 else:
                     logger.warning(f"PDF file was created but appears to be empty: {filepath}")
                     return None
-            except Exception as e:
-                logger.error(f"Error saving PDF file: {e}")
-                logger.error(f"Attempted to save to: {filepath}")
+                    
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Failed to download from {pdf_url}: {e}")
                 return None
+                
         except Exception as e:
             logger.error(f"Error downloading paper: {e}")
             return None

@@ -1,0 +1,21 @@
+docker build -t biorxiv-summarizer .
+
+docker run --network=host -it --rm -v $(pwd):/app -v $(pwd)/papers:/app/papers biorxiv-summarizer
+
+python main.py --topics "spatial transcriptomics" "cell communication" "bioinformatics" \
+    --fuzzy-match \
+    --api-provider anthropic \
+    --model "claude-3-7-sonnet-20250219" \
+    --max-response-tokens 10000 \
+    --output-dir papers/ \
+    --prompt prompts/scientific_paper_prompt.md \
+    --max-papers 10 \
+    --days 365 \
+    --rank-by downloads \
+    --verbose \
+    --disable-ssl-verify \
+    --bypass-api \
+    --log-file "papers/biorxiv_search.20250418.log"
+
+    --skip-prompt \
+    --download-only \

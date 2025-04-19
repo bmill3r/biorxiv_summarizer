@@ -7,7 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Anthropic API support for paper summarization
+  - Added `--api-provider` option to select between OpenAI and Anthropic
+  - Added `--anthropic-key` parameter for Anthropic API key
+  - Added support for Claude models (claude-3-7-sonnet-20250219, etc.)
+  - Updated documentation with Anthropic API setup instructions
+- Customizable response token limits
+  - Added `--max-response-tokens` parameter to control summary length
+  - Set higher default token limits for Claude models (8000 vs 3000 for OpenAI)
+  - Optimized chunking logic to take advantage of Claude's higher token limits
+  - Improved handling of long papers with Claude models
+- Existing PDF detection and handling
+  - Added detection of already downloaded PDFs
+  - Implemented interactive prompt with options to download again, skip, or use existing PDF
+  - Added `--skip-prompt` flag to automatically use existing PDFs without prompting
+  - Improved workflow efficiency by avoiding unnecessary downloads
+- Full PDF extraction support
+  - Changed default behavior to extract all pages from PDFs (previously limited to 30 pages)
+  - Added `--max-pdf-pages` parameter to optionally limit the number of pages extracted
+  - Improved progress display with progress bars instead of per-page logging
+  - Added spinner animation for API calls to provide visual feedback
+- Download-only mode
+  - Added `--download-only` option to download papers without generating summaries
+  - Improved workflow for users who only want to collect papers for later review
+  - Maintained prompt behavior for existing PDFs (can be combined with `--skip-prompt`)
+
 ### Fixed
+- SSL connection issues with bioRxiv API
+  - Added robust retry mechanism with exponential backoff
+  - Implemented proper timeout handling for API requests
+  - Added session persistence for better connection management
+  - Added explicit dependency on urllib3 for retry functionality
+  - Added `--disable-ssl-verify` option for troubleshooting SSL connection issues
+  - Implemented fallback mechanism to scrape bioRxiv website directly when API connection fails
+  - Added `--bypass-api` option to skip the API entirely and use web scraping directly
+  - Reduced API retry attempts from 5 to 2 for faster fallback to web scraping
+
+- PDF download improvements
+  - Enhanced PDF URL construction with better paper ID extraction
+  - Added support for paper IDs with decimal points and version numbers
+  - Improved date extraction from paper IDs for better metadata
+  - Fixed streaming download with chunked transfer for better memory efficiency
+
+- Summary file path handling in Docker
+  - Fixed issue with saving summary files when using Docker volume mounts
+  - Added directory creation to ensure output paths exist
+  - Improved error handling for file operations
+
+- Date handling in paper summarizer
+  - Fixed error when publication date is None during prompt template replacement
+  - Added safe handling of missing or invalid dates in paper sorting
+
 - PDF processor CLI import and function compatibility issues
   - Fixed incorrect relative import in pdf_processor/cli.py
   - Created a custom logging_utils.py module in the pdf_processor package with a compatible setup_logging function

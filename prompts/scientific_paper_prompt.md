@@ -87,20 +87,6 @@ Generate a structured, authoritative analysis using the following comprehensive 
 - **Benchmarking:** [Comparison to alternative approaches]
 - **Code Quality:** [Assessment of software implementation if available]
 - **Computational Reproducibility:** [Ability to reproduce computational results]
-- **Example Code:** [Toy example demonstrating key computational approach]
-
-```python
-# Example implementation of key algorithm with toy dataset if it's in python
-import numpy as np
-import pandas as pd
-# [Include simplified implementation of core computational approach]
-```
-
-```r
-# Example implementation of key algorithm with toy dataset if it's in R
-library(dplyr)
-# [Include simplified implementation of core computational approach]
-```
 
 ## 8. Validation and Extension Experiments
 - **Critical Validation Experiment:** [Experiment that would conclusively validate key claim]

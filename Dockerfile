@@ -2,14 +2,22 @@ FROM python:3.9-slim
 
 WORKDIR /app
 
+# Method 3: Add system-wide aliases
+RUN echo 'alias ll="ls -lahg"' >> /etc/bash.bashrc && \
+    echo 'alias ..="cd .."' >> /etc/bash.bashrc
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    git \
-    git-lfs \
+    # git \
+    # git-lfs \
+    curl \
+    ca-certificates \
+    openssl \
+    && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Initialize Git LFS
-RUN git lfs install
+# RUN git lfs install
 
 # Copy requirements first for better caching
 COPY requirements.txt .
