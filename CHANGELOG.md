@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Anthropic API support for paper summarization
+  - Added `--api-provider` option to select between OpenAI and Anthropic
+  - Added `--anthropic-key` parameter for Anthropic API key
+  - Added support for Claude models (claude-3-7-sonnet-20250219, etc.)
+  - Updated documentation with Anthropic API setup instructions
+- Customizable response token limits
+  - Added `--max-response-tokens` parameter to control summary length
+  - Set higher default token limits for Claude models (8000 vs 3000 for OpenAI)
+  - Optimized chunking logic to take advantage of Claude's higher token limits
+  - Improved handling of long papers with Claude models
+- Existing PDF detection and handling
+  - Added detection of already downloaded PDFs
+  - Implemented interactive prompt with options to download again, skip, or use existing PDF
+  - Added `--skip-prompt` flag to automatically use existing PDFs without prompting
+  - Improved workflow efficiency by avoiding unnecessary downloads
+- Full PDF extraction support
+  - Changed default behavior to extract all pages from PDFs (previously limited to 30 pages)
+  - Added `--max-pdf-pages` parameter to optionally limit the number of pages extracted
+  - Improved progress display with progress bars instead of per-page logging
+  - Added spinner animation for API calls to provide visual feedback
+- Download-only mode
+  - Added `--download-only` option to download papers without generating summaries
+  - Improved workflow for users who only want to collect papers for later review
+  - Maintained prompt behavior for existing PDFs (can be combined with `--skip-prompt`)
+
 ### Fixed
 - SSL connection issues with bioRxiv API
   - Added robust retry mechanism with exponential backoff

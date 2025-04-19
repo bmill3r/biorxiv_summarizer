@@ -28,10 +28,12 @@ This tool automates the workflow for researchers to:
   - [Using Custom Prompts](#using-custom-prompts)
   - [Available Placeholders](#available-placeholders)
   - [Example Custom Prompts](#example-custom-prompts)
+  - [Model Selection and Response Length](#model-selection-and-response-length)
 - [Logging Features](#logging-features)
   - [Log Levels](#log-levels)
   - [Log to File](#log-to-file)
 - [Advanced Usage Examples](#advanced-usage-examples)
+- [PDF Processing Options](#pdf-processing-options)
 - [FAQ](#faq)
   - [Topic Search Tips](#topic-search-tips)
   - [Common Issues](#common-issues)
@@ -42,6 +44,7 @@ This tool automates the workflow for researchers to:
 
 - Python 3.6 or higher
 - OpenAI API key (for summary generation)
+- Anthropic API key (optional, for summary generation)
 - Altmetric API key (optional, for social media impact ranking)
 - Google Cloud account with Drive API enabled (optional, for Google Drive integration)
 
@@ -201,30 +204,32 @@ Alternatively, you can pass the API key directly via environment variable:
 
 ```bash
 export OPENAI_API_KEY=your_api_key_here
-
-# Recommended (if installed with pip install -e .)
-biorxiv-summarizer [options]
-
-# Alternative (without installation)
-python main.py [options]
 ```
 
-### Altmetric API (Optional)
-
-1. Request a free researcher API key from [Altmetric](https://www.altmetric.com/)
-2. Add it to your `.env` file:
-   ```
-   ALTMETRIC_API_KEY=your_altmetric_key_here
-   ```
-
-Or pass it via command line:
+Or pass it as a command-line argument:
 
 ```bash
-# Recommended (if installed with pip install -e .)
-biorxiv-summarizer --altmetric-key your_altmetric_key_here [other options]
+biorxiv-summarizer --topic "CRISPR" --openai-key "your_api_key_here"
+```
 
-# Alternative (without installation)
-python main.py --altmetric-key your_altmetric_key_here [other options]
+### Anthropic API
+
+1. Get an API key from [Anthropic](https://console.anthropic.com/)
+2. Create a `.env` file in the project directory with:
+   ```
+   ANTHROPIC_API_KEY=your_api_key_here
+   ```
+
+Alternatively, you can pass the API key directly via environment variable:
+
+```bash
+export ANTHROPIC_API_KEY=your_api_key_here
+```
+
+Or pass it as a command-line argument:
+
+```bash
+biorxiv-summarizer --topic "CRISPR" --api-provider anthropic --anthropic-key "your_api_key_here"
 ```
 
 ### Google Drive API (Optional)
@@ -245,24 +250,21 @@ python main.py --altmetric-key your_altmetric_key_here [other options]
 
 ## Basic Usage
 
-The simplest way to use the tool is:
+Search for papers on a specific topic, download them, and generate summaries:
 
 ```bash
-# If installed as a package
-biorxiv-summarizer --topic "your search topic"
+# Using OpenAI (default)
+biorxiv-summarizer --topic "CRISPR"
 
-# Or using the main.py script
-python main.py --topic "your search topic"
-
-# Or using the original script (still works but not recommended)
-python biorxiv_summarizer.py --topic "your search topic"
+# Using Anthropic
+biorxiv-summarizer --topic "CRISPR" --api-provider anthropic --model "claude-3-7-sonnet-20250219"
 ```
 
 This will:
-1. Search for the 5 most recent papers on your topic from the last 30 days
-2. Download them to a directory named "papers"
-3. Generate summaries using the default prompt
-4. Save summaries alongside the PDFs
+1. Search bioRxiv for papers on "CRISPR" published in the last 30 days
+2. Download the top 5 papers (ranked by publication date)
+3. Generate summaries using the specified AI model
+4. Save both the PDFs and summaries to the ./papers directory
 
 ## Search Options
 
@@ -402,104 +404,37 @@ python main.py --topic "proteomics" --credentials "credentials.json" \
 
 ## Summary Customization
 
-### Using Custom Prompts
+### AI Provider Selection
 
-You can customize how papers are summarized in two ways:
+You can choose between OpenAI and Anthropic for generating summaries:
 
-**1. File-based prompt:**
 ```bash
-# Recommended (if installed with pip install -e .)
-biorxiv-summarizer --topic "CRISPR" --prompt "scientific_paper_prompt.md"
+# Use OpenAI (default)
+biorxiv-summarizer --topic "genomics" --api-provider openai --model "gpt-4o-mini"
 
-# Alternative (without installation)
-python main.py --topic "CRISPR" --prompt "scientific_paper_prompt.md"
+# Use Anthropic
+biorxiv-summarizer --topic "genomics" --api-provider anthropic --model "claude-3-7-sonnet-20250219"
 ```
 
-**2. Command-line prompt:**
+Available models depend on the provider:
+- OpenAI: "gpt-3.5-turbo", "gpt-4", "gpt-4-turbo", "gpt-4o", "gpt-4o-mini", etc.
+- Anthropic: "claude-3-7-sonnet-20250219", "claude-3-5-sonnet-20240620", "claude-3-opus-20240229", etc.
+
+### Model Selection and Response Length
+
+You can customize the AI model used for summarization and control the length of the generated summaries:
+
 ```bash
-# Recommended (if installed with pip install -e .)
-biorxiv-summarizer --topic "genomics" --prompt-text "Analyze the paper {title} by {authors}. Focus on methodological strengths and weaknesses."
+# For more detailed OpenAI summaries
+biorxiv-summarizer --topic "genomics" --max-response-tokens 4000
 
-# Alternative (without installation)
-python main.py --topic "genomics" --prompt-text "Analyze the paper {title} by {authors}. Focus on methodological strengths and weaknesses."
+# For comprehensive Claude summaries
+biorxiv-summarizer --topic "genomics" --api-provider anthropic --max-response-tokens 10000
 ```
 
-### Available Placeholders
-
-Your custom prompts can include these placeholders:
-
-- `{title}`: The paper's title
-- `{authors}`: Comma-separated list of authors
-- `{abstract}`: The paper's abstract
-- `{doi}`: The paper's DOI
-- `{date}`: The publication date
-- `{paper_text}`: The extracted text from the paper (limited to first ~10,000 characters)
-
-### Example Custom Prompts
-
-#### 1. Focused Methodological Assessment
-
-```
-Please analyze the methodology of paper "{title}" by {authors}.
-
-- What methods did they use?
-- Are the methods appropriate for the research question?
-- What are the strengths and weaknesses of the chosen approach?
-- What alternative methods could have been used?
-
-Paper text:
-{paper_text}
-```
-
-#### 2. Educational Summary for Students
-
-```
-Create a pedagogical summary of "{title}" for undergraduate students.
-
-Abstract: {abstract}
-
-Paper content: {paper_text}
-
-Your summary should:
-1. Explain the key concepts in simple terms
-2. Highlight the significance of the findings
-3. Explain any technical terms
-4. Connect the research to foundational concepts in biology
-5. Suggest 3 discussion questions for a classroom setting
-```
-
-#### 3. Research Replication Assessment
-
-```
-Assess the replicability of the study "{title}" (DOI: {doi}) published on {date}.
-
-Paper content: {paper_text}
-
-Please analyze:
-1. Are the methods described in sufficient detail to replicate?
-2. Are all materials, data, and code accessible?
-3. What potential barriers exist to replication?
-4. Rate the overall replicability on a scale of 1-5, with justification
-5. Suggest specific steps to improve replicability
-```
-
-#### 4. Cross-Paper Thematic Analysis
-
-This prompt works well when you're processing multiple papers on the same topic:
-
-```
-Analyze paper "{title}" by {authors} as part of a thematic review of [YOUR TOPIC].
-
-Abstract: {abstract}
-
-Paper content: {paper_text}
-
-Please identify:
-1. How does this paper connect to the broader topic?
-2. What unique perspective or data does it contribute?
-3. How does it compare to other papers in this field?
-4. What gaps remain to be addressed?
-```
+The default response token limits are:
+- OpenAI models: 3000 tokens
+- Claude models: 8000 tokens
 
 ## Advanced Usage Examples
 
@@ -546,6 +481,77 @@ biorxiv-summarizer --topic "protein structure prediction" --rank-by date \
 python main.py --topic "protein structure prediction" --rank-by date \
   --model "gpt-4" --prompt "expert_analysis.md"
 ```
+
+### PDF Processing Options
+
+By default, the tool extracts text from all pages of each PDF. For very large PDFs, you can limit the number of pages processed:
+
+```bash
+# Limit to processing only the first 50 pages of each PDF
+biorxiv-summarizer --topic "genomics" --max-pdf-pages 50
+```
+
+This can be useful for:
+- Reducing processing time for extremely large papers
+- Focusing on the most important content (typically in the first sections)
+- Conserving API tokens when working with limited quotas
+
+### Download-Only Mode
+
+If you only want to download PDFs without generating summaries, use the `--download-only` flag:
+
+```bash
+# Download papers without generating summaries
+biorxiv-summarizer --topic "genomics" --download-only
+```
+
+This option will:
+- Download all matching papers as PDFs
+- Skip the summary generation step entirely
+- Still prompt you if a PDF already exists (unless `--skip-prompt` is also used)
+
+This is useful when:
+- You want to quickly collect papers for later review
+- You don't have API access for summary generation
+- You prefer to read the full papers rather than summaries
+- You want to use a different tool for summarization
+
+### Handling Existing PDFs
+
+By default, if the tool detects that a paper has already been downloaded, it will prompt you with options:
+
+```
+Paper already downloaded. What would you like to do?
+[d]ownload again, [s]kip this paper, [c]ontinue with existing PDF:
+```
+
+- **d**: Re-download the paper, overwriting the existing file
+- **s**: Skip this paper entirely and move to the next one
+- **c**: Use the existing PDF file for summarization
+
+If you want to automatically skip papers that have already been downloaded, use the `--skip-prompt` flag:
+
+```bash
+biorxiv-summarizer --topic "genomics" --skip-prompt
+```
+
+This will skip any papers that have already been downloaded and move on to the next papers in the list, avoiding duplicate downloads and processing.
+
+### Customizing Model Response Length
+
+You can control the length and detail of generated summaries by adjusting the maximum number of tokens for model responses:
+
+```bash
+# For more detailed OpenAI summaries
+biorxiv-summarizer --topic "genomics" --max-response-tokens 4000
+
+# For comprehensive Claude summaries
+biorxiv-summarizer --topic "genomics" --api-provider anthropic --max-response-tokens 10000
+```
+
+The default token limits are:
+- OpenAI models: 3000 tokens
+- Claude models: 8000 tokens
 
 ## FAQ
 
@@ -646,6 +652,10 @@ biorxiv-summarizer --topic "CRISPR" --authors "Zhang F" --days 90
 # Alternative (without installation)
 python main.py --topic "CRISPR" --authors "Zhang F" --days 90
 ```
+
+In combined searches:
+- `--topic-match` controls how topics are matched (all/any)
+- `--author-match` controls how authors are matched (all/any)
 
 ## Troubleshooting
 

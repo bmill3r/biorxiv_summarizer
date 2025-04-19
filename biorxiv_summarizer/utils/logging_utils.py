@@ -72,6 +72,25 @@ def setup_logging(args):
     # Add handler to logger
     logger.addHandler(console_handler)
     
+    # Add file handler if log file is specified
+    if hasattr(args, 'log_file') and args.log_file:
+        try:
+            # Create file handler
+            file_handler = logging.FileHandler(args.log_file, mode='w')
+            
+            # Set level (always include all logs in the file)
+            file_handler.setLevel(logging.DEBUG)
+            
+            # Create a non-colored formatter for file output
+            file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+            file_handler.setFormatter(file_formatter)
+            
+            # Add handler to logger
+            logger.addHandler(file_handler)
+            logger.info(f"Logging to file: {args.log_file}")
+        except Exception as e:
+            logger.error(f"Failed to set up log file: {e}")
+    
     # Log the configuration
     logger.info(f"{Fore.CYAN}BioRxiv Paper Summarizer{Style.RESET_ALL}")
     logger.info(f"{Fore.CYAN}{'='*50}{Style.RESET_ALL}")

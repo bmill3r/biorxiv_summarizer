@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Method 3: Add system-wide aliases
 RUN echo 'alias ll="ls -lahg"' >> /etc/bash.bashrc && \
-    echo '..="cd .."' >> /etc/bash.bashrc
+    echo 'alias ..="cd .."' >> /etc/bash.bashrc
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \

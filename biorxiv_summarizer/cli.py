@@ -78,13 +78,19 @@ def parse_arguments():
     summary_group.add_argument('--openai-key', type=str,
                          help='OpenAI API key (can also be set as OPENAI_API_KEY environment variable)')
     summary_group.add_argument('--model', type=str, default='gpt-4o-mini',
-                         help='OpenAI model to use for summarization')
+                         help='AI model to use for summarization')
     summary_group.add_argument('--temperature', type=float, default=0.2,
-                         help='Temperature for OpenAI API (0.0-1.0)')
+                         help='Temperature for API (0.0-1.0)')
     summary_group.add_argument('--prompt', type=str,
                          help='Path to a file containing a custom prompt template')
     summary_group.add_argument('--prompt-text', type=str,
                          help='Custom prompt text to use instead of a prompt file')
+    summary_group.add_argument('--api-provider', type=str, choices=['openai', 'anthropic'], default='openai',
+                         help='AI provider to use for summarization (openai or anthropic)')
+    summary_group.add_argument('--anthropic-key', type=str,
+                         help='Anthropic API key (can also be set as ANTHROPIC_API_KEY environment variable)')
+    summary_group.add_argument('--max-response-tokens', type=int,
+                         help='Maximum number of tokens for model responses (defaults to 3000 for OpenAI and 8000 for Claude)')
     
     # Google Drive parameters
     drive_group = parser.add_argument_group('Google Drive Parameters')
@@ -101,6 +107,8 @@ def parse_arguments():
                          help='Enable verbose logging')
     logging_group.add_argument('--full-debug', action='store_true',
                          help='Enable full debug logging (including paper metadata)')
+    logging_group.add_argument('--log-file', type=str,
+                         help='Path to save log file')
     
     # Advanced parameters
     advanced_group = parser.add_argument_group('Advanced Parameters')
@@ -108,6 +116,12 @@ def parse_arguments():
                          help='Disable SSL verification (not recommended for production use, only for troubleshooting)')
     advanced_group.add_argument('--bypass-api', action='store_true',
                          help='Bypass the bioRxiv API and use web scraping directly (useful when the API is down)')
+    advanced_group.add_argument('--skip-prompt', action='store_true',
+                         help='Skip prompt for existing PDFs')
+    advanced_group.add_argument('--download-only', action='store_true',
+                         help='Only download PDFs without generating summaries')
+    advanced_group.add_argument('--max-pdf-pages', type=int, 
+                         help='Maximum number of pages to extract from PDFs (default: all pages)')
     
     return parser.parse_args()
 
@@ -149,12 +163,19 @@ def initialize_components(args):
             api_key=args.openai_key,
             custom_prompt_path=prompt_path,
             temperature=args.temperature,
-            model=args.model
+            model=args.model,
+            api_provider=args.api_provider,
+            anthropic_api_key=args.anthropic_key,
+            max_response_tokens=args.max_response_tokens
         )
     except ValueError as e:
         logger.error(f"{Fore.RED}Error initializing summarizer: {e}{Style.RESET_ALL}")
-        logger.error("Make sure your OpenAI API key is set correctly.")
-        logger.error("You can set it using the --openai-key argument or as the OPENAI_API_KEY environment variable.")
+        if args.api_provider == 'openai':
+            logger.error("Make sure your OpenAI API key is set correctly.")
+            logger.error("You can set it using the --openai-key argument or as the OPENAI_API_KEY environment variable.")
+        elif args.api_provider == 'anthropic':
+            logger.error("Make sure your Anthropic API key is set correctly.")
+            logger.error("You can set it using the --anthropic-key argument or as the ANTHROPIC_API_KEY environment variable.")
         return None, None, None, None, rank_weights, temp_prompt_file
     
     # Initialize Google Drive uploader if requested
@@ -225,25 +246,39 @@ def process_papers(papers, args, summarizer, uploader=None, drive_folder_id=None
     
     api_quota_exceeded = False  # Flag to track if we've hit API quota limits
     
+    # Add a new CLI argument for skipping the prompt for existing PDFs
+    skip_prompt = getattr(args, 'skip_prompt', False)
+    
     for i, paper in enumerate(papers, 1):
         title = paper.get('title', 'Unknown')
         logger.info(f"\n{Fore.CYAN}Processing paper {i}/{len(papers)}: {title}{Style.RESET_ALL}")
         
         # Download paper
         searcher = BioRxivSearcher()  # Create a temporary instance just for downloading
-        pdf_path = searcher.download_paper(paper, args.output_dir)
+        pdf_path = searcher.download_paper(paper, args.output_dir, skip_prompt)
+        
+        # Check if the paper was skipped
+        if pdf_path and "|skipped" in pdf_path:
+            # Extract the actual path
+            pdf_path = pdf_path.split("|")[0]
+            logger.info(f"{Fore.YELLOW}Skipping paper: {title}{Style.RESET_ALL}")
+            continue
+            
         if not pdf_path:
             logger.error(f"Failed to download paper: {title}")
             continue
         
-        # Skip summarization if we've already hit quota limits
-        if api_quota_exceeded:
-            logger.warning("Skipping summary generation due to previously encountered API quota limits.")
+        # Skip summarization if we've already hit quota limits or if download-only is specified
+        if api_quota_exceeded or args.download_only:
             logger.info(f"Paper downloaded to: {pdf_path}")
             continue
             
         # Generate summary
-        summary_result = summarizer.generate_summary(pdf_path, paper)
+        summary_result = summarizer.generate_summary(
+            pdf_path, 
+            paper, 
+            max_pdf_pages=args.max_pdf_pages
+        )
         
         # Check if the result is an error dictionary
         if isinstance(summary_result, dict) and 'error' in summary_result:

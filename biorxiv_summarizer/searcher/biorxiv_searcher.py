@@ -850,16 +850,18 @@ class BioRxivSearcher:
         
         return papers
     
-    def download_paper(self, paper: Dict[str, Any], output_dir: str) -> Optional[str]:
+    def download_paper(self, paper: Dict[str, Any], output_dir: str, skip_prompt: bool = False) -> Optional[str]:
         """
         Download a paper as PDF.
         
         Args:
             paper: Paper metadata from the API
             output_dir: Directory to save the PDF
+            skip_prompt: If True, will overwrite existing files without prompting
             
         Returns:
             Path to the downloaded PDF, or None if download failed
+            If the file already exists and user chooses to skip, returns the path with a "skipped" flag
         """
         try:
             # Ensure output directory exists
@@ -889,6 +891,113 @@ class BioRxivSearcher:
                 logger.error("No valid PDF URL could be constructed")
                 return None
             
+            # Get paper date in YYYY-MM-DD format
+            paper_date = paper.get('date', datetime.datetime.now().strftime('%Y-%m-%d'))
+            
+            # Get first author
+            first_author = "Unknown"
+            authors = paper.get('authors', [])
+            
+            # Enhanced author name extraction with minimal logging
+            if authors:
+                # Try multiple approaches to extract author name correctly
+                if isinstance(authors[0], dict):
+                    author_name = authors[0].get('name', '')
+                    
+                    # Handle possible name formats
+                    name_parts = author_name.split()
+                    
+                    if len(name_parts) > 1:
+                        sanitized_author = f"{name_parts[-1]} {name_parts[0][0]}"
+                    else:
+                        sanitized_author = author_name
+                    
+                elif isinstance(authors[0], str):
+                    name_parts = authors[0].split()
+                    
+                    if len(name_parts) > 1:
+                        sanitized_author = f"{name_parts[-1]} {name_parts[0][0]}"
+                    else:
+                        sanitized_author = authors[0]
+                    
+                # Handle other possible data structures
+                elif isinstance(authors[0], list):
+                    if authors[0] and isinstance(authors[0][0], str):
+                        name_parts = authors[0][0].split()
+                        if len(name_parts) > 1:
+                            sanitized_author = f"{name_parts[-1]} {name_parts[0][0]}"
+                else:
+                    # Try to convert to string and extract
+                    try:
+                        author_str = str(authors[0])
+                        if author_str and len(author_str) > 1:
+                            name_parts = author_str.split()
+                            if len(name_parts) > 1:
+                                sanitized_author = f"{name_parts[-1]} {name_parts[0][0]}"
+                            else:
+                                sanitized_author = author_str
+                    except Exception as e:
+                        logger.error(f"Error extracting author name: {e}")
+    
+            # Get short title (first 10 words or less)
+            title = paper.get('title', 'Unknown')
+            short_title = ' '.join(title.split()[:10])
+            if len(title.split()) > 10:
+                short_title += "..."
+            
+            # Construct a sanitized filename with the requested format
+            sanitized_title = re.sub(r'[^\w\s-]', '', short_title)
+            sanitized_title = re.sub(r'\s+', ' ', sanitized_title).strip()
+            
+            # Ensure author name is properly formatted as "LastName FirstInitial"
+            sanitized_author = re.sub(r'[^\w\s-]', '', sanitized_author)
+            
+            # Make sure we don't have just a single letter for the author
+            if len(sanitized_author.strip()) <= 1:
+                # Try to extract a better author name from the raw author data
+                try:
+                    authors = paper.get('authors', [])
+                    if authors and isinstance(authors, list) and len(authors) > 0:
+                        # Try different approaches to get a better author name
+                        if isinstance(authors[0], dict) and 'name' in authors[0]:
+                            full_name = authors[0]['name']
+                            name_parts = full_name.split()
+                            
+                            if len(name_parts) > 1:
+                                sanitized_author = f"{name_parts[-1]} {name_parts[0][0]}"
+                except Exception as e:
+                    logger.error(f"Error extracting author name: {e}")
+        
+            filename = f"{paper_date} - {sanitized_author} - {sanitized_title}.pdf"
+            # Remove any problematic characters for filenames
+            filename = re.sub(r'[<>:"/\\|?*]', '', filename)
+            filepath = os.path.join(output_dir, filename)
+            
+            # Check if the file already exists
+            if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                logger.info(f"{Fore.YELLOW}PDF already exists: {filepath}{Style.RESET_ALL}")
+                
+                # If skip_prompt is True, just return the existing file path with a flag
+                if skip_prompt:
+                    return f"{filepath}|skipped"
+                
+                # Ask user what to do
+                while True:
+                    choice = input(f"\n{Fore.YELLOW}Paper already downloaded. What would you like to do?{Style.RESET_ALL}\n"
+                                  f"[d]ownload again, [s]kip this paper, [c]ontinue with existing PDF: ").lower()
+                    
+                    if choice == 'd':
+                        logger.info(f"Re-downloading paper...")
+                        break
+                    elif choice == 's':
+                        logger.info(f"Skipping paper...")
+                        return f"{filepath}|skipped"
+                    elif choice == 'c':
+                        logger.info(f"Using existing PDF...")
+                        return filepath
+                    else:
+                        print(f"{Fore.RED}Invalid choice. Please try again.{Style.RESET_ALL}")
+            
             logger.info(f"{Fore.BLUE}Downloading: {paper.get('title')}{Style.RESET_ALL}")
             
             # Add user-agent header to mimic a browser
@@ -911,88 +1020,6 @@ class BioRxivSearcher:
                     if len(response.content) < 1000:  # Small response is likely an error page
                         logger.error(f"Response content too small, likely an error page")
                         return None
-                
-                # Get paper date in YYYY-MM-DD format
-                paper_date = paper.get('date', datetime.datetime.now().strftime('%Y-%m-%d'))
-                
-                # Get first author
-                first_author = "Unknown"
-                authors = paper.get('authors', [])
-                
-                # Enhanced author name extraction with minimal logging
-                if authors:
-                    # Try multiple approaches to extract author name correctly
-                    if isinstance(authors[0], dict):
-                        author_name = authors[0].get('name', '')
-                        
-                        # Handle possible name formats
-                        name_parts = author_name.split()
-                        
-                        if len(name_parts) > 1:
-                            sanitized_author = f"{name_parts[-1]} {name_parts[0][0]}"
-                        else:
-                            sanitized_author = author_name
-                        
-                    elif isinstance(authors[0], str):
-                        name_parts = authors[0].split()
-                        
-                        if len(name_parts) > 1:
-                            sanitized_author = f"{name_parts[-1]} {name_parts[0][0]}"
-                        else:
-                            sanitized_author = authors[0]
-                        
-                    # Handle other possible data structures
-                    elif isinstance(authors[0], list):
-                        if authors[0] and isinstance(authors[0][0], str):
-                            name_parts = authors[0][0].split()
-                            if len(name_parts) > 1:
-                                sanitized_author = f"{name_parts[-1]} {name_parts[0][0]}"
-                    else:
-                        # Try to convert to string and extract
-                        try:
-                            author_str = str(authors[0])
-                            if author_str and len(author_str) > 1:
-                                name_parts = author_str.split()
-                                if len(name_parts) > 1:
-                                    sanitized_author = f"{name_parts[-1]} {name_parts[0][0]}"
-                                else:
-                                    sanitized_author = author_str
-                        except Exception as e:
-                            logger.error(f"Error extracting author name: {e}")
-        
-                # Get short title (first 10 words or less)
-                title = paper.get('title', 'Unknown')
-                short_title = ' '.join(title.split()[:10])
-                if len(title.split()) > 10:
-                    short_title += "..."
-                
-                # Construct a sanitized filename with the requested format
-                sanitized_title = re.sub(r'[^\w\s-]', '', short_title)
-                sanitized_title = re.sub(r'\s+', ' ', sanitized_title).strip()
-                
-                # Ensure author name is properly formatted as "LastName FirstInitial"
-                sanitized_author = re.sub(r'[^\w\s-]', '', sanitized_author)
-                
-                # Make sure we don't have just a single letter for the author
-                if len(sanitized_author.strip()) <= 1:
-                    # Try to extract a better author name from the raw author data
-                    try:
-                        authors = paper.get('authors', [])
-                        if authors and isinstance(authors, list) and len(authors) > 0:
-                            # Try different approaches to get a better author name
-                            if isinstance(authors[0], dict) and 'name' in authors[0]:
-                                full_name = authors[0]['name']
-                                name_parts = full_name.split()
-                                
-                                if len(name_parts) > 1:
-                                    sanitized_author = f"{name_parts[-1]} {name_parts[0][0]}"
-                    except Exception as e:
-                        logger.error(f"Error extracting author name: {e}")
-            
-                filename = f"{paper_date} - {sanitized_author} - {sanitized_title}.pdf"
-                # Remove any problematic characters for filenames
-                filename = re.sub(r'[<>:"/\\|?*]', '', filename)
-                filepath = os.path.join(output_dir, filename)
                 
                 # Save the PDF
                 with open(filepath, 'wb') as f:

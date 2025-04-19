@@ -14,9 +14,14 @@ import tempfile
 from typing import Dict, Any, Optional, List, Union, Tuple
 import PyPDF2
 from openai import OpenAI
+import anthropic
 from colorama import Fore, Style
 import tiktoken
 import psutil
+from tqdm import tqdm
+import threading
+import sys
+import time
 
 # Get logger
 logger = logging.getLogger('biorxiv_summarizer')
@@ -24,29 +29,59 @@ logger = logging.getLogger('biorxiv_summarizer')
 class PaperSummarizer:
     """Class to generate summaries of scientific papers."""
     
-    def __init__(self, api_key: Optional[str] = None, custom_prompt_path: Optional[str] = None, temperature: float = 0.2, model: str = "gpt-3.5-turbo"):
+    def __init__(self, api_key: Optional[str] = None, custom_prompt_path: Optional[str] = None, 
+                 temperature: float = 0.2, model: str = "gpt-3.5-turbo", 
+                 api_provider: str = "openai", anthropic_api_key: Optional[str] = None,
+                 max_response_tokens: Optional[int] = None):
         """
         Initialize the paper summarizer.
         
         Args:
             api_key: OpenAI API key (optional if set in environment)
             custom_prompt_path: Path to a file containing a custom prompt template (optional)
-            temperature: Temperature setting for OpenAI API (0.0-1.0)
-            model: OpenAI model to use for summarization (default: gpt-3.5-turbo)
+            temperature: Temperature setting for API (0.0-1.0)
+            model: AI model to use for summarization (default: gpt-3.5-turbo)
+            api_provider: AI provider to use ("openai" or "anthropic")
+            anthropic_api_key: Anthropic API key (optional if set in environment)
+            max_response_tokens: Maximum number of tokens for model responses (optional, defaults to 3000 for OpenAI and 8000 for Claude)
         """
-        # Use provided API key or get from environment
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        if not self.api_key:
-            raise ValueError("OpenAI API key is required. Set it as OPENAI_API_KEY environment variable or pass it directly.")
-            
-        # Initialize OpenAI client
-        self.client = OpenAI(api_key=self.api_key)
+        # Set the API provider
+        self.api_provider = api_provider.lower()
+        
+        # Initialize based on provider
+        if self.api_provider == "openai":
+            # Use provided API key or get from environment
+            self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+            if not self.api_key:
+                raise ValueError("OpenAI API key is required. Set it as OPENAI_API_KEY environment variable or pass it directly.")
+                
+            # Initialize OpenAI client
+            self.client = OpenAI(api_key=self.api_key)
+        elif self.api_provider == "anthropic":
+            # Use provided API key or get from environment
+            self.anthropic_api_key = anthropic_api_key or os.getenv("ANTHROPIC_API_KEY")
+            if not self.anthropic_api_key:
+                raise ValueError("Anthropic API key is required. Set it as ANTHROPIC_API_KEY environment variable or pass it directly.")
+                
+            # Initialize Anthropic client
+            self.client = anthropic.Anthropic(api_key=self.anthropic_api_key)
+        else:
+            raise ValueError(f"Unsupported API provider: {self.api_provider}. Use 'openai' or 'anthropic'.")
         
         # Set temperature for API calls
         self.temperature = temperature
         
         # Set the model to use
         self.model = model
+        
+        # Set the maximum response tokens
+        if max_response_tokens is None:
+            if "claude" in self.model.lower():
+                self.max_response_tokens = 8000
+            else:
+                self.max_response_tokens = 3000
+        else:
+            self.max_response_tokens = max_response_tokens
         
         # Load custom prompt if provided
         self.custom_prompt = None
@@ -72,29 +107,40 @@ class PaperSummarizer:
         
     def num_tokens_from_string(self, string: str, model: str = "gpt-3.5-turbo") -> int:
         """Returns the number of tokens in a text string."""
-        encoding = tiktoken.encoding_for_model(model)
-        num_tokens = len(encoding.encode(string))
-        return num_tokens
+        # For Anthropic models, use a simple approximation (4 chars per token)
+        if "claude" in model.lower():
+            # Anthropic models use roughly 4 characters per token on average
+            return len(string) // 4
+        
+        # For OpenAI models, use tiktoken
+        try:
+            encoding = tiktoken.encoding_for_model(model)
+            num_tokens = len(encoding.encode(string))
+            return num_tokens
+        except KeyError:
+            # Fallback to cl100k_base encoding (used by gpt-4, gpt-3.5-turbo, text-embedding-ada-002)
+            encoding = tiktoken.get_encoding("cl100k_base")
+            num_tokens = len(encoding.encode(string))
+            return num_tokens
 
-    def extract_text_from_pdf(self, pdf_path: str, max_pages: int = 30) -> str:
+    def extract_text_from_pdf(self, pdf_path: str, max_pages: Optional[int] = None) -> str:
         """
         Extract text from a PDF file using a file-based approach to minimize memory usage.
         
         Args:
             pdf_path: Path to the PDF file
-            max_pages: Maximum number of pages to extract
+            max_pages: Maximum number of pages to extract (None means extract all pages)
             
         Returns:
             Extracted text from the PDF or path to temporary file containing the text
         """
-        logger.info(f"Extracting text from PDF: {pdf_path}")
-        self.log_memory_usage("before PDF extraction")
-        
-        # Create a temporary directory for extracted text
-        temp_dir = tempfile.mkdtemp(prefix="biorxiv_pdf_text_")
-        output_file = os.path.join(temp_dir, "extracted_text.txt")
+        self.log_memory_usage("Before PDF extraction")
         
         try:
+            # Create a temporary file to store the extracted text
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.txt') as temp:
+                output_file = temp.name
+            
             # Open the output file for writing
             with open(output_file, 'w', encoding='utf-8') as out_file:
                 # Open the PDF file
@@ -102,74 +148,62 @@ class PaperSummarizer:
                     reader = PyPDF2.PdfReader(file)
                     num_pages = len(reader.pages)
                     
-                    # Limit the number of pages to process
-                    pages_to_process = min(num_pages, max_pages)
-                    logger.info(f"Processing {pages_to_process} pages out of {num_pages} total")
+                    # Determine pages to process (all pages if max_pages is None)
+                    pages_to_process = num_pages if max_pages is None else min(num_pages, max_pages)
+                    logger.info(f"Extracting text from PDF: {pages_to_process} pages out of {num_pages} total")
                     
                     # Extract text from each page individually to minimize memory usage
                     batch_size = 1  # Process 1 page at a time for minimum memory usage
                     
-                    for i in range(0, pages_to_process):
-                        try:
-                            logger.info(f"Processing page {i+1} of {pages_to_process}")
-                            
-                            # Extract text from this page
-                            page = reader.pages[i]
-                            page_text = page.extract_text()
-                            
-                            # Write directly to file
-                            if page_text:
-                                out_file.write(page_text)
-                                out_file.write("\n\n")
-                            
-                            # Free memory immediately
-                            del page
-                            del page_text
-                            
-                            # Force garbage collection every few pages
-                            if i % 3 == 0:
-                                gc.collect()
+                    # Use tqdm for a progress bar instead of logging each page
+                    # Configure a cleaner, more informative progress bar
+                    with tqdm(
+                        total=pages_to_process,
+                        desc=f"{Fore.GREEN}Extracting PDF text{Style.RESET_ALL}",
+                        unit="page",
+                        bar_format='{desc}: |{bar:30}| {percentage:3.0f}% | {n_fmt}/{total_fmt} pages',
+                        colour='green'
+                    ) as pbar:
+                        for i in range(0, pages_to_process):
+                            try:
+                                # Extract text from this page
+                                page = reader.pages[i]
+                                page_text = page.extract_text()
                                 
-                        except Exception as e:
-                            logger.warning(f"Error extracting text from page {i+1}: {e}")
+                                # Write directly to file
+                                if page_text:
+                                    out_file.write(page_text)
+                                    out_file.write("\n\n")
+                                
+                                # Free memory immediately
+                                del page
+                                del page_text
+                                
+                                # Collect garbage to free memory
+                                if i % 5 == 0:  # Every 5 pages
+                                    gc.collect()
+                                    
+                                # Update progress bar
+                                pbar.update(1)
+                                    
+                            except Exception as e:
+                                logger.error(f"Error extracting text from page {i+1}: {e}")
+                                pbar.update(1)  # Still update the progress bar
+                                continue
             
-            # Now read the file back in small chunks to check if we got any text
-            with open(output_file, 'r', encoding='utf-8') as f:
-                # Just check the first few bytes to see if there's any content
-                sample = f.read(1000)
-                if not sample.strip():
-                    logger.warning("No text could be extracted from the PDF")
-                    return ""
-            
-            # Instead of returning the entire text in memory, read it from the file
-            # in the generate_summary method as needed
-            self.log_memory_usage("after PDF extraction")
-            
-            # Read the entire file back into memory
-            # We'll use a more memory-efficient approach in the future if needed
+            # Read the extracted text back from the file
             with open(output_file, 'r', encoding='utf-8') as f:
                 text = f.read()
             
-            # Clean up temporary files
-            try:
-                os.unlink(output_file)
-                os.rmdir(temp_dir)
-            except Exception as e:
-                logger.error(f"Error cleaning up temporary files: {e}")
-                
-            return text
-                
-        except Exception as e:
-            logger.error(f"Error processing PDF: {e}")
+            # Clean up the temporary file
+            os.unlink(output_file)
             
-            # Clean up temporary files
-            try:
-                if os.path.exists(output_file):
-                    os.unlink(output_file)
-                os.rmdir(temp_dir)
-            except Exception as cleanup_error:
-                logger.error(f"Error cleaning up temporary files: {cleanup_error}")
-                
+            self.log_memory_usage("After PDF extraction")
+            
+            return text
+            
+        except Exception as e:
+            logger.error(f"Error extracting text from PDF: {e}")
             return ""
     
     def chunk_text(self, text: str, max_chunk_tokens: int, overlap_tokens: int = 100) -> List[str]:
@@ -194,7 +228,7 @@ class PaperSummarizer:
             logger.warning(f"Invalid max_chunk_tokens: {max_chunk_tokens}, setting to 2000")
             max_chunk_tokens = 2000
         
-        # Estimate total tokens based on character count
+        # Estimate total tokens based on character count first to avoid memory spike
         estimated_tokens = len(text) / 4  # Rough estimate: ~4 chars per token
         logger.info(f"Estimated tokens in text: ~{estimated_tokens:.0f} (based on character count)")
         
@@ -214,9 +248,8 @@ class PaperSummarizer:
                 with open(temp_file, 'r', encoding='utf-8') as f:
                     content = f.read()
                     
-                # Initialize encoding only when needed
-                encoding = tiktoken.encoding_for_model(self.model)
-                actual_tokens = len(encoding.encode(content))
+                # Use our token counting method instead of direct tiktoken
+                actual_tokens = self.num_tokens_from_string(content, self.model)
                 
                 if actual_tokens <= max_chunk_tokens:
                     logger.info(f"Text fits in one chunk ({actual_tokens} tokens)")
@@ -350,34 +383,92 @@ class PaperSummarizer:
             Summary of the chunk
         """
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt_prefix.replace("{paper_text}", chunk) if "{paper_text}" in user_prompt_prefix else f"{user_prompt_prefix}\n\nFull Text:\n{chunk}"}
-                ],
-                temperature=self.temperature,
-                max_tokens=max_tokens,
-            )
+            # Construct the full user prompt
+            user_prompt = f"{user_prompt_prefix}\n\nFull Text:\n{chunk}"
             
-            return response.choices[0].message.content
+            # Log that we're making an API call
+            logger.info(f"Sending request to {self.api_provider} API...")
+            
+            # Create a stop event for the spinner
+            stop_event = threading.Event()
+            
+            # Start the spinner animation in a separate thread
+            spinner_thread = threading.Thread(
+                target=self.spinner_animation, 
+                args=(stop_event, f"Generating summary for chunk...")
+            )
+            spinner_thread.daemon = True
+            spinner_thread.start()
+            
+            try:
+                # Make the API call
+                if self.api_provider == "openai":
+                    response = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        temperature=self.temperature,
+                        max_tokens=max_tokens,
+                    )
+                    
+                    summary = response.choices[0].message.content
+                    
+                elif self.api_provider == "anthropic":
+                    message = self.client.messages.create(
+                        model=self.model,
+                        max_tokens=max_tokens,
+                        temperature=self.temperature,
+                        system=system_prompt,
+                        messages=[
+                            {"role": "user", "content": user_prompt}
+                        ]
+                    )
+                    
+                    summary = message.content[0].text
+                    
+                else:
+                    raise ValueError(f"Unsupported API provider: {self.api_provider}")
+            finally:
+                # Stop the spinner animation
+                stop_event.set()
+                spinner_thread.join(timeout=1.0)
+                print(f"\r{Fore.GREEN}Chunk summary generation complete!{Style.RESET_ALL}")
+            
+            return summary
+            
         except Exception as e:
-            logger.error(f"Error generating chunk summary: {e}")
-            raise e
+            # Provide more detailed error information for connection issues
+            error_message = str(e)
+            if "connect" in error_message.lower() or "connection" in error_message.lower() or "timeout" in error_message.lower():
+                logger.error(f"API Connection Error: {e}")
+                # Check if it's an API key issue
+                if "api key" in error_message.lower() or "apikey" in error_message.lower() or "authentication" in error_message.lower():
+                    return f"Error: API authentication failed. Please check your {self.api_provider.upper()} API key. Details: {error_message}"
+                # Check if it's a network issue
+                elif "timeout" in error_message.lower() or "connection" in error_message.lower():
+                    return f"Error: Network connection issue when connecting to {self.api_provider.upper()} API. Please check your internet connection and try again. If using Docker, ensure network settings are correct. Details: {error_message}"
+                else:
+                    return f"Error: Connection to {self.api_provider.upper()} API failed. Details: {error_message}"
+            else:
+                logger.error(f"Error generating summary for chunk: {e}")
+                return f"Error generating summary: {error_message}"
 
-    def generate_summary(self, pdf_path: str, paper_metadata: Dict[str, Any]) -> Union[str, Dict[str, str]]:
+    def generate_summary(self, pdf_path: str, paper_metadata: Dict[str, Any], max_pdf_pages: Optional[int] = None) -> Union[str, Dict[str, str]]:
         """
         Generate a comprehensive summary of a scientific paper.
         
         Args:
             pdf_path: Path to the PDF file
             paper_metadata: Metadata about the paper
+            max_pdf_pages: Maximum number of pages to extract from the PDF (None means all pages)
             
         Returns:
             Generated summary of the paper or error information
         """
         # Extract text from PDF
-        paper_text = self.extract_text_from_pdf(pdf_path)
+        paper_text = self.extract_text_from_pdf(pdf_path, max_pages=max_pdf_pages)
         
         if not paper_text:
             logger.error("Failed to extract text from PDF")
@@ -514,18 +605,23 @@ class PaperSummarizer:
         system_tokens = self.num_tokens_from_string(system_prompt, self.model)
         prefix_tokens = self.num_tokens_from_string(user_prompt_prefix, self.model)
         
-        # Reserve tokens for the response and some overhead
-        reserved_tokens = 3000  # for the model's response
-        overhead_tokens = 100   # for formatting, etc.
+        # Add overhead tokens for formatting
+        overhead_tokens = 100
         
         # Calculate maximum tokens available for the paper text
-        model_max_tokens = 16000 if "gpt-4" in self.model else 4000  # Adjust based on the model
-        if "32k" in self.model:
-            model_max_tokens = 32000
-        elif "16k" in self.model:
-            model_max_tokens = 16000
+        # For Claude models, use a much higher token limit
+        if "claude" in self.model.lower():
+            model_max_tokens = 100000  # Claude models have very high token limits
+            logger.info(f"Using Claude model with high token limit: {model_max_tokens}")
+        else:
+            # For OpenAI models, use appropriate limits
+            model_max_tokens = 16000 if "gpt-4" in self.model else 4000  # Adjust based on the model
+            if "32k" in self.model:
+                model_max_tokens = 32000
+            elif "16k" in self.model:
+                model_max_tokens = 16000
         
-        max_chunk_tokens = model_max_tokens - system_tokens - prefix_tokens - reserved_tokens - overhead_tokens
+        max_chunk_tokens = model_max_tokens - system_tokens - prefix_tokens - self.max_response_tokens - overhead_tokens
         
         logger.info(f"Model max tokens: {model_max_tokens}")
         logger.info(f"System prompt tokens: {system_tokens}")
@@ -537,26 +633,110 @@ class PaperSummarizer:
         logger.info(f"Estimated paper text tokens: ~{estimated_tokens:.0f} (based on character count)")
         
         # Log the API call
-        logger.info(f"{Fore.BLUE}Generating summary using {self.model}{Style.RESET_ALL}")
+        logger.info(f"{Fore.BLUE}Generating summary using {self.api_provider} model: {self.model}{Style.RESET_ALL}")
         
         try:
             # Always calculate exact token count before deciding to chunk
             paper_tokens = self.num_tokens_from_string(paper_text, self.model)
             logger.info(f"Actual paper text tokens: {paper_tokens}")
             
-            if paper_tokens <= max_chunk_tokens:
-                # Process normally - paper fits within token limits
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": f"{user_prompt_prefix}\n\nFull Text:\n{paper_text}"}
-                    ],
-                    temperature=self.temperature,
-                    max_tokens=reserved_tokens,
-                )
+            # For Claude models, we can often skip chunking due to high token limits
+            if "claude" in self.model.lower() and paper_tokens <= max_chunk_tokens:
+                logger.info(f"Using Claude model with sufficient token limit, skipping chunking")
                 
-                summary = response.choices[0].message.content
+                # Create a stop event for the spinner
+                stop_event = threading.Event()
+                
+                # Start the spinner animation in a separate thread
+                spinner_thread = threading.Thread(
+                    target=self.spinner_animation, 
+                    args=(stop_event, f"Generating summary with {self.model}...")
+                )
+                spinner_thread.daemon = True
+                spinner_thread.start()
+                
+                try:
+                    # Make the API call
+                    message = self.client.messages.create(
+                        model=self.model,
+                        max_tokens=self.max_response_tokens,
+                        temperature=self.temperature,
+                        system=system_prompt,
+                        messages=[
+                            {"role": "user", "content": f"{user_prompt_prefix}\n\nFull Text:\n{paper_text}"}
+                        ]
+                    )
+                    
+                    summary = message.content[0].text
+                finally:
+                    # Stop the spinner animation
+                    stop_event.set()
+                    spinner_thread.join(timeout=1.0)
+                    print(f"\r{Fore.GREEN}Summary generation complete!{Style.RESET_ALL}")
+                    
+            elif paper_tokens <= max_chunk_tokens:
+                # Process normally - paper fits within token limits
+                if self.api_provider == "openai":
+                    # Create a stop event for the spinner
+                    stop_event = threading.Event()
+                    
+                    # Start the spinner animation in a separate thread
+                    spinner_thread = threading.Thread(
+                        target=self.spinner_animation, 
+                        args=(stop_event, f"Generating summary with {self.model}...")
+                    )
+                    spinner_thread.daemon = True
+                    spinner_thread.start()
+                    
+                    try:
+                        # Make the API call
+                        response = self.client.chat.completions.create(
+                            model=self.model,
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": f"{user_prompt_prefix}\n\nFull Text:\n{paper_text}"}
+                            ],
+                            temperature=self.temperature,
+                            max_tokens=self.max_response_tokens,
+                        )
+                        
+                        summary = response.choices[0].message.content
+                    finally:
+                        # Stop the spinner animation
+                        stop_event.set()
+                        spinner_thread.join(timeout=1.0)
+                        print(f"\r{Fore.GREEN}Summary generation complete!{Style.RESET_ALL}")
+                        
+                elif self.api_provider == "anthropic":
+                    # Create a stop event for the spinner
+                    stop_event = threading.Event()
+                    
+                    # Start the spinner animation in a separate thread
+                    spinner_thread = threading.Thread(
+                        target=self.spinner_animation, 
+                        args=(stop_event, f"Generating summary with {self.model}...")
+                    )
+                    spinner_thread.daemon = True
+                    spinner_thread.start()
+                    
+                    try:
+                        # Make the API call
+                        message = self.client.messages.create(
+                            model=self.model,
+                            max_tokens=self.max_response_tokens,
+                            temperature=self.temperature,
+                            system=system_prompt,
+                            messages=[
+                                {"role": "user", "content": f"{user_prompt_prefix}\n\nFull Text:\n{paper_text}"}
+                            ]
+                        )
+                        
+                        summary = message.content[0].text
+                    finally:
+                        # Stop the spinner animation
+                        stop_event.set()
+                        spinner_thread.join(timeout=1.0)
+                        print(f"\r{Fore.GREEN}Summary generation complete!{Style.RESET_ALL}")
             else:
                 # Paper exceeds token limits - process in chunks
                 logger.info(f"Paper exceeds token limits ({paper_tokens} tokens > {max_chunk_tokens} max). Processing in chunks.")
@@ -649,11 +829,6 @@ class PaperSummarizer:
                     # After processing this batch, force garbage collection again
                     gc.collect()
                     self.log_memory_usage(f"after batch {batch_start+1}-{batch_end}")
-                
-                # Free up chunks list completely
-                del chunks
-                gc.collect()
-                self.log_memory_usage("after all chunks processed")
                 
                 # Combine chunk summaries into a final summary, but process in batches
                 combined_summaries = ""
@@ -794,25 +969,48 @@ class PaperSummarizer:
                 self.log_memory_usage("before final API call")
                 
                 try:
-                    response = self.client.chat.completions.create(
-                        model=self.model,
-                        messages=[
-                            {"role": "system", "content": "You are a scientific research assistant tasked with creating a comprehensive analysis of a scientific paper by combining multiple partial summaries. Follow the structure and format specified in the template EXACTLY."},
-                            {"role": "user", "content": consolidation_prompt}
-                        ],
-                        temperature=self.temperature,
-                        max_tokens=3000,
+                    # Create a stop event for the spinner
+                    stop_event = threading.Event()
+                    
+                    # Start the spinner animation in a separate thread
+                    spinner_thread = threading.Thread(
+                        target=self.spinner_animation, 
+                        args=(stop_event, f"Generating final summary...")
                     )
+                    spinner_thread.daemon = True
+                    spinner_thread.start()
                     
-                    # Free memory
-                    del consolidation_prompt
-                    gc.collect()
-                    
-                    summary = response.choices[0].message.content
-                except Exception as e:
-                    logger.error(f"Error consolidating summaries: {e}")
-                    # Fall back to just concatenating the summaries
-                    summary = "# Combined Summary from Multiple Parts\n\n" + combined_summaries
+                    if self.api_provider == "openai":
+                        # Make the API call
+                        response = self.client.chat.completions.create(
+                            model=self.model,
+                            messages=[
+                                {"role": "system", "content": "You are a scientific research assistant tasked with creating a comprehensive analysis of a scientific paper by combining multiple partial summaries. Follow the structure and format specified in the template EXACTLY."},
+                                {"role": "user", "content": consolidation_prompt}
+                            ],
+                            temperature=self.temperature,
+                            max_tokens=self.max_response_tokens,
+                        )
+                        
+                        summary = response.choices[0].message.content
+                    elif self.api_provider == "anthropic":
+                        # Make the API call
+                        message = self.client.messages.create(
+                            model=self.model,
+                            max_tokens=self.max_response_tokens,
+                            temperature=self.temperature,
+                            system="You are a scientific research assistant tasked with creating a comprehensive analysis of a scientific paper by combining multiple partial summaries. Follow the structure and format specified in the template EXACTLY.",
+                            messages=[
+                                {"role": "user", "content": consolidation_prompt}
+                            ]
+                        )
+                        
+                        summary = message.content[0].text
+                finally:
+                    # Stop the spinner animation
+                    stop_event.set()
+                    spinner_thread.join(timeout=1.0)
+                    print(f"\r{Fore.GREEN}Final summary generation complete!{Style.RESET_ALL}")
             
             # Add paper metadata as a header
             final_summary = f"# {title}\n\n"
@@ -839,6 +1037,28 @@ class PaperSummarizer:
             else:
                 return {"error": "api_error", "message": error_message}
     
+    def spinner_animation(self, stop_event, message):
+        """
+        Display a spinner animation in the console while waiting for a process to complete.
+        
+        Args:
+            stop_event: Threading event to signal when to stop the spinner
+            message: Message to display alongside the spinner
+        """
+        spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+        i = 0
+        try:
+            while not stop_event.is_set():
+                sys.stdout.write(f"\r{Fore.BLUE}{message} {spinner_chars[i % len(spinner_chars)]}{Style.RESET_ALL}")
+                sys.stdout.flush()
+                i += 1
+                time.sleep(0.1)
+            # Clear the spinner line when done
+            sys.stdout.write("\r" + " " * (len(message) + 10) + "\r")
+            sys.stdout.flush()
+        except Exception:
+            pass
+    
     def _create_fallback_summary(self, title, authors, abstract, pub_date, doi):
         """Create a fallback summary when chunking or processing fails."""
         try:
@@ -859,17 +1079,31 @@ class PaperSummarizer:
                 system_prompt = "You are a scientific research assistant tasked with summarizing bioRxiv preprints based on their abstracts."
                 user_prompt = f"Please provide a brief summary of the following scientific paper based on its abstract:\n\nTitle: {title}\nAuthors: {authors}\nAbstract: {abstract}"
                 
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=self.temperature,
-                    max_tokens=1000,
-                )
+                if self.api_provider == "openai":
+                    response = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        temperature=self.temperature,
+                        max_tokens=1000,
+                    )
+                    
+                    abstract_summary = response.choices[0].message.content
+                elif self.api_provider == "anthropic":
+                    message = self.client.messages.create(
+                        model=self.model,
+                        max_tokens=1000,
+                        temperature=self.temperature,
+                        system=system_prompt,
+                        messages=[
+                            {"role": "user", "content": user_prompt}
+                        ]
+                    )
+                    
+                    abstract_summary = message.content[0].text
                 
-                abstract_summary = response.choices[0].message.content
                 fallback_summary += abstract_summary
             except Exception as e:
                 logger.error(f"Error generating abstract summary: {e}")
