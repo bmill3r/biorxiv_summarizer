@@ -102,12 +102,23 @@ def parse_arguments():
     logging_group.add_argument('--full-debug', action='store_true',
                          help='Enable full debug logging (including paper metadata)')
     
+    # Advanced parameters
+    advanced_group = parser.add_argument_group('Advanced Parameters')
+    advanced_group.add_argument('--disable-ssl-verify', action='store_true',
+                         help='Disable SSL verification (not recommended for production use, only for troubleshooting)')
+    advanced_group.add_argument('--bypass-api', action='store_true',
+                         help='Bypass the bioRxiv API and use web scraping directly (useful when the API is down)')
+    
     return parser.parse_args()
 
 def initialize_components(args):
     """Initialize the main components needed for the workflow."""
     # Initialize searcher with Altmetric API key if provided
-    searcher = BioRxivSearcher(altmetric_api_key=args.altmetric_key)
+    searcher = BioRxivSearcher(
+        altmetric_api_key=args.altmetric_key,
+        verify_ssl=not args.disable_ssl_verify,
+        bypass_api=args.bypass_api
+    )
     
     # Set up weights for combined ranking
     rank_weights = {

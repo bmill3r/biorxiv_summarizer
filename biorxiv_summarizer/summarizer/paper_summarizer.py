@@ -434,10 +434,16 @@ class PaperSummarizer:
         abstract = paper_metadata.get('abstract', 'No abstract available')
         
         # Get publication date
-        pub_date = paper_metadata.get('date', 'Unknown Date')
+        pub_date = paper_metadata.get('date', None)
+        
+        # Handle the case where pub_date might be None
+        safe_pub_date = pub_date if pub_date is not None else "Unknown date"
         
         # Get DOI
-        doi = paper_metadata.get('doi', 'No DOI available')
+        doi = paper_metadata.get('doi', None)
+        
+        # Handle the case where doi might be None
+        safe_doi = doi if doi is not None else "No DOI available"
         
         # Construct the prompt
         if self.custom_prompt:
@@ -484,8 +490,8 @@ class PaperSummarizer:
         prompt = prompt.replace("{TITLE}", title).replace("{title}", title)
         prompt = prompt.replace("{AUTHORS}", authors_text).replace("{authors}", authors_text)
         prompt = prompt.replace("{ABSTRACT}", abstract).replace("{abstract}", abstract)
-        prompt = prompt.replace("{DATE}", pub_date).replace("{date}", pub_date)
-        prompt = prompt.replace("{DOI}", doi).replace("{doi}", doi)
+        prompt = prompt.replace("{DATE}", safe_pub_date).replace("{date}", safe_pub_date)
+        prompt = prompt.replace("{DOI}", safe_doi).replace("{doi}", safe_doi)
         
         # Add additional placeholders that might be in the scientific_paper_prompt.md
         journal = paper_metadata.get('journal', 'bioRxiv (Preprint)')
@@ -502,7 +508,7 @@ class PaperSummarizer:
         system_prompt = "You are a scientific research assistant tasked with summarizing bioRxiv preprints. Provide clear, concise, and accurate summaries that highlight the key findings, methods, strengths, limitations, and implications of the research."
         
         # User prompt prefix (metadata and instructions)
-        user_prompt_prefix = f"{prompt}\n\nPaper Metadata:\nTitle: {title}\nAuthors: {authors_text}\nDate: {pub_date}\nDOI: {doi}\n\nAbstract:\n{abstract}"
+        user_prompt_prefix = f"{prompt}\n\nPaper Metadata:\nTitle: {title}\nAuthors: {authors_text}\nDate: {safe_pub_date}\nDOI: {safe_doi}\n\nAbstract:\n{abstract}"
         
         # Calculate token counts
         system_tokens = self.num_tokens_from_string(system_prompt, self.model)
@@ -570,11 +576,11 @@ class PaperSummarizer:
                         # If chunking failed, fall back to a simple approach
                         logger.warning("Chunking failed or returned no chunks. Falling back to simplified summary.")
                         # Create a simple summary with just metadata
-                        return self._create_fallback_summary(title, authors_text, abstract, pub_date, doi)
+                        return self._create_fallback_summary(title, authors_text, abstract, safe_pub_date, safe_doi)
                 except Exception as e:
                     logger.error(f"Error during chunking: {e}")
                     # Fall back to a simple summary with just metadata
-                    return self._create_fallback_summary(title, authors_text, abstract, pub_date, doi)
+                    return self._create_fallback_summary(title, authors_text, abstract, safe_pub_date, safe_doi)
                 
                 # Create a temporary directory for chunk summaries
                 temp_dir = tempfile.mkdtemp(prefix="biorxiv_summary_")
@@ -758,8 +764,8 @@ class PaperSummarizer:
                     Paper Information:
                     - Title: {title}
                     - Authors: {authors_text}
-                    - DOI: {doi}
-                    - Publication Date: {pub_date}
+                    - DOI: {safe_doi}
+                    - Publication Date: {safe_pub_date}
                     - Abstract: {abstract}
                     
                     Part Summaries (to be integrated):
@@ -811,8 +817,8 @@ class PaperSummarizer:
             # Add paper metadata as a header
             final_summary = f"# {title}\n\n"
             final_summary += f"**Authors:** {authors_text}\n\n"
-            final_summary += f"**Publication Date:** {pub_date}\n\n"
-            final_summary += f"**DOI:** {doi}\n\n"
+            final_summary += f"**Publication Date:** {safe_pub_date}\n\n"
+            final_summary += f"**DOI:** {safe_doi}\n\n"
             final_summary += f"**Abstract:** {abstract}\n\n"
             final_summary += "---\n\n"
             final_summary += summary

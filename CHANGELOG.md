@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- SSL connection issues with bioRxiv API
+  - Added robust retry mechanism with exponential backoff
+  - Implemented proper timeout handling for API requests
+  - Added session persistence for better connection management
+  - Added explicit dependency on urllib3 for retry functionality
+  - Added `--disable-ssl-verify` option for troubleshooting SSL connection issues
+  - Implemented fallback mechanism to scrape bioRxiv website directly when API connection fails
+  - Added `--bypass-api` option to skip the API entirely and use web scraping directly
+  - Reduced API retry attempts from 5 to 2 for faster fallback to web scraping
+
+- PDF download improvements
+  - Enhanced PDF URL construction with better paper ID extraction
+  - Added support for paper IDs with decimal points and version numbers
+  - Improved date extraction from paper IDs for better metadata
+  - Fixed streaming download with chunked transfer for better memory efficiency
+
+- Summary file path handling in Docker
+  - Fixed issue with saving summary files when using Docker volume mounts
+  - Added directory creation to ensure output paths exist
+  - Improved error handling for file operations
+
+- Date handling in paper summarizer
+  - Fixed error when publication date is None during prompt template replacement
+  - Added safe handling of missing or invalid dates in paper sorting
+
 - PDF processor CLI import and function compatibility issues
   - Fixed incorrect relative import in pdf_processor/cli.py
   - Created a custom logging_utils.py module in the pdf_processor package with a compatible setup_logging function

@@ -36,6 +36,7 @@ This tool automates the workflow for researchers to:
   - [Topic Search Tips](#topic-search-tips)
   - [Common Issues](#common-issues)
 - [Troubleshooting](#troubleshooting)
+- [Troubleshooting Options](#troubleshooting-options)
 
 ## Requirements
 
@@ -220,10 +221,10 @@ Or pass it via command line:
 
 ```bash
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --altmetric_key your_altmetric_key_here [other options]
+biorxiv-summarizer --altmetric-key your_altmetric_key_here [other options]
 
 # Alternative (without installation)
-python main.py --altmetric_key your_altmetric_key_here [other options]
+python main.py --altmetric-key your_altmetric_key_here [other options]
 ```
 
 ### Google Drive API (Optional)
@@ -291,10 +292,10 @@ By default, papers must match ALL specified topics. You can change this behavior
 
 ```bash
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --topics "CRISPR" "gene editing" "off-target effects" --match any
+biorxiv-summarizer --topics "CRISPR" "gene editing" "off-target effects" --topic-match any
 
 # Alternative (without installation)
-python main.py --topics "CRISPR" "gene editing" "off-target effects" --match any
+python main.py --topics "CRISPR" "gene editing" "off-target effects" --topic-match any
 ```
 
 This will return papers that match ANY of the specified topics.
@@ -305,10 +306,10 @@ Control how many papers and from what time period:
 
 ```bash
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --topic "genomics" --max_papers 10 --days 60
+biorxiv-summarizer --topic "genomics" --max-papers 10 --days 60
 
 # Alternative (without installation)
-python main.py --topic "genomics" --max_papers 10 --days 60
+python main.py --topic "genomics" --max-papers 10 --days 60
 ```
 
 This searches for papers published in the last 60 days and returns up to 10 results.
@@ -319,10 +320,10 @@ The tool provides several ways to rank the search results:
 
 ```bash
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --topic "neuroscience" --rank_by downloads
+biorxiv-summarizer --topic "neuroscience" --rank-by downloads
 
 # Alternative (without installation)
-python main.py --topic "neuroscience" --rank_by downloads
+python main.py --topic "neuroscience" --rank-by downloads
 ```
 
 Available ranking methods:
@@ -336,22 +337,22 @@ You can also specify the ranking direction:
 
 ```bash
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --topic "COVID-19" --rank_by downloads --rank_direction asc
+biorxiv-summarizer --topic "COVID-19" --rank-by downloads --rank-direction asc
 
 # Alternative (without installation)
-python main.py --topic "COVID-19" --rank_by downloads --rank_direction asc
+python main.py --topic "COVID-19" --rank-by downloads --rank-direction asc
 ```
 
 For combined ranking, you can customize the weights:
 
 ```bash
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --topic "neuroscience" --rank_by combined \
-  --weight_downloads 0.3 --weight_views 0.1 --weight_altmetric 0.5 --weight_twitter 0.1
+biorxiv-summarizer --topic "neuroscience" --rank-by combined \
+  --weight-downloads 0.3 --weight-views 0.1 --weight-altmetric 0.5 --weight-twitter 0.1
 
 # Alternative (without installation)
-python main.py --topic "neuroscience" --rank_by combined \
-  --weight_downloads 0.3 --weight_views 0.1 --weight_altmetric 0.5 --weight_twitter 0.1
+python main.py --topic "neuroscience" --rank-by combined \
+  --weight-downloads 0.3 --weight-views 0.1 --weight-altmetric 0.5 --weight-twitter 0.1
 ```
 
 ## Output Options
@@ -362,10 +363,10 @@ By default, papers and summaries are saved to a directory named "papers" in the 
 
 ```bash
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --topic "immunology" --output_dir "/path/to/your/directory"
+biorxiv-summarizer --topic "immunology" --output-dir "/path/to/your/directory"
 
 # Alternative (without installation)
-python main.py --topic "immunology" --output_dir "/path/to/your/directory"
+python main.py --topic "immunology" --output-dir "/path/to/your/directory"
 ```
 
 Files are named with this format: `{date} - {first_author} - {short_title}.pdf` and `{date} - {first_author} - {short_title}.md` for the summary.
@@ -408,19 +409,19 @@ You can customize how papers are summarized in two ways:
 **1. File-based prompt:**
 ```bash
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --topic "CRISPR" --custom_prompt "scientific_paper_prompt.md"
+biorxiv-summarizer --topic "CRISPR" --prompt "scientific_paper_prompt.md"
 
 # Alternative (without installation)
-python main.py --topic "CRISPR" --custom_prompt "scientific_paper_prompt.md"
+python main.py --topic "CRISPR" --prompt "scientific_paper_prompt.md"
 ```
 
 **2. Command-line prompt:**
 ```bash
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --topic "genomics" --prompt_string "Analyze the paper {title} by {authors}. Focus on methodological strengths and weaknesses."
+biorxiv-summarizer --topic "genomics" --prompt-text "Analyze the paper {title} by {authors}. Focus on methodological strengths and weaknesses."
 
 # Alternative (without installation)
-python main.py --topic "genomics" --prompt_string "Analyze the paper {title} by {authors}. Focus on methodological strengths and weaknesses."
+python main.py --topic "genomics" --prompt-text "Analyze the paper {title} by {authors}. Focus on methodological strengths and weaknesses."
 ```
 
 ### Available Placeholders
@@ -509,13 +510,13 @@ Get the most impactful papers on a topic, with custom summary format:
 ```bash
 # Recommended (if installed with pip install -e .)
 biorxiv-summarizer --topics "single cell RNA-seq" "spatial transcriptomics" \
-  --rank_by combined --max_papers 10 --days 90 \
-  --custom_prompt "literature_review_template.md"
+  --rank-by combined --max-papers 10 --days 90 \
+  --prompt "literature_review_template.md"
 
 # Alternative (without installation)
 python main.py --topics "single cell RNA-seq" "spatial transcriptomics" \
-  --rank_by combined --max_papers 10 --days 90 \
-  --custom_prompt "literature_review_template.md"
+  --rank-by combined --max-papers 10 --days 90 \
+  --prompt "literature_review_template.md"
 ```
 
 ### 2. Educational Resource Creation
@@ -524,12 +525,12 @@ Find the most downloaded papers on a topic and generate student-friendly summari
 
 ```bash
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --topic "genome editing" --rank_by downloads \
-  --max_papers 5 --prompt_string "Create a beginner-friendly explanation of {title} for undergraduate students. Explain key concepts, significance, and implications."
+biorxiv-summarizer --topic "genome editing" --rank-by downloads \
+  --max-papers 5 --prompt-text "Create a beginner-friendly explanation of {title} for undergraduate students. Explain key concepts, significance, and implications."
 
 # Alternative (without installation)
-python main.py --topic "genome editing" --rank_by downloads \
-  --max_papers 5 --prompt_string "Create a beginner-friendly explanation of {title} for undergraduate students. Explain key concepts, significance, and implications."
+python main.py --topic "genome editing" --rank-by downloads \
+  --max-papers 5 --prompt-text "Create a beginner-friendly explanation of {title} for undergraduate students. Explain key concepts, significance, and implications."
 ```
 
 ### 3. Field Monitoring with Multiple Models
@@ -538,12 +539,12 @@ For thorough analysis, you might run the tool with different models:
 
 ```bash
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --topic "protein structure prediction" --rank_by date \
-  --model "gpt-4" --custom_prompt "expert_analysis.md"
+biorxiv-summarizer --topic "protein structure prediction" --rank-by date \
+  --model "gpt-4" --prompt "expert_analysis.md"
 
 # Alternative (without installation)
-python main.py --topic "protein structure prediction" --rank_by date \
-  --model "gpt-4" --custom_prompt "expert_analysis.md"
+python main.py --topic "protein structure prediction" --rank-by date \
+  --model "gpt-4" --prompt "expert_analysis.md"
 ```
 
 ## FAQ
@@ -565,27 +566,27 @@ If you're not getting results, try these approaches:
 ```bash
 # Use broader or fewer terms
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --topics "transcriptomics" --max_papers 1 --days 60
+biorxiv-summarizer --topics "transcriptomics" --max-papers 1 --days 60
 # Alternative (without installation)
-python main.py --topics "transcriptomics" --max_papers 1 --days 60
+python main.py --topics "transcriptomics" --max-papers 1 --days 60
 
 # Use ANY matching instead of ALL
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --topics "Computational Biology" "Bioinformatics" "Single-Cell Transcriptomics" --topic_match any --max_papers 1 --days 60
+biorxiv-summarizer --topics "Computational Biology" "Bioinformatics" "Single-Cell Transcriptomics" --topic-match any --max_papers 1 --days 60
 # Alternative (without installation)
 python main.py --topics "Computational Biology" "Bioinformatics" "Single-Cell Transcriptomics" --topic_match any --max_papers 1 --days 60
 
 # Increase the search window
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --topics "Computational Biology" --days 90 --max_papers 5
+biorxiv-summarizer --topic "Computational Biology" --days 90 --max-papers 5
 # Alternative (without installation)
-python main.py --topics "Computational Biology" --days 90 --max_papers 5
+python main.py --topic "Computational Biology" --days 90 --max-papers 5
 
 # Use fuzzy matching (matches similar terms)
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --topics "RNA-seq" --fuzzy_match --max_papers 5
+biorxiv-summarizer --topic "RNA-seq" --fuzzy-match --max-papers 5
 # Alternative (without installation)
-python main.py --topics "RNA-seq" --fuzzy_match --max_papers 5
+python main.py --topic "RNA-seq" --fuzzy-match --max-papers 5
 ```
 
 #### What text is being searched when I provide topics?
@@ -604,11 +605,11 @@ Sometimes the bioRxiv API might not classify papers with the exact terms you're 
 
 #### Special characters in search terms
 
-If your search terms contain special characters like hyphens (e.g., "RNA-seq"), these might be interpreted as regex special characters. Use the `--fuzzy_match` option to handle these cases better.
+If your search terms contain special characters like hyphens (e.g., "RNA-seq"), these might be interpreted as regex special characters. Use the `--fuzzy-match` option to handle these cases better.
 
 #### Fuzzy matching
 
-The `--fuzzy_match` parameter implements a more flexible topic matching system that helps find relevant papers even when the exact terms don't appear in the paper's metadata. Here's what it does:
+The `--fuzzy-match` parameter implements a more flexible topic matching system that helps find relevant papers even when the exact terms don't appear in the paper's metadata. Here's what it does:
 
 - Word-by-word matching: Instead of requiring the entire topic phrase to match exactly, it breaks down each topic into individual words and looks for those words in the paper's metadata.
 - Partial matching threshold: It considers a topic to be a match if at least 70% of the words in that topic are found in the paper's metadata.
@@ -626,7 +627,7 @@ This is particularly helpful for:
 
 #### No papers found with multiple specific topics
 
-Requiring ALL topics to be present in a paper's metadata can be very restrictive. Try using `--topic_match any` to find papers that match at least one of your topics.
+Requiring ALL topics to be present in a paper's metadata can be very restrictive. Try using `--topic-match any` to find papers that match at least one of your topics.
 
 #### Getting too many irrelevant results
 
@@ -635,15 +636,15 @@ If you're getting too many papers that aren't relevant to your interests, try:
 ```bash
 # Combine multiple specific topics with ALL matching
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --topics "CRISPR" "gene therapy" "clinical trials" --topic_match all
+biorxiv-summarizer --topics "CRISPR" "gene therapy" "clinical trials" --topic-match all
 # Alternative (without installation)
-python main.py --topics "CRISPR" "gene therapy" "clinical trials" --topic_match all
+python main.py --topics "CRISPR" "gene therapy" "clinical trials" --topic-match all
 
 # Combine topic and author search
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --topics "CRISPR" --authors "Zhang F" --days 90
+biorxiv-summarizer --topic "CRISPR" --authors "Zhang F" --days 90
 # Alternative (without installation)
-python main.py --topics "CRISPR" --authors "Zhang F" --days 90
+python main.py --topic "CRISPR" --authors "Zhang F" --days 90
 ```
 
 ## Troubleshooting
@@ -690,10 +691,10 @@ Search for papers by a specific author:
 
 ```bash
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --author "Smith" --max_papers 3
+biorxiv-summarizer --author "Smith" --max-papers 3
 
 # Alternative (without installation)
-python main.py --author "Smith" --max_papers 3
+python main.py --author "Smith" --max-papers 3
 ``` 
 
 ### Multiple Authors
@@ -702,20 +703,20 @@ Search for papers by multiple authors:
 
 ```bash
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --authors "Smith" "Johnson" "Lee" --max_papers 5
+biorxiv-summarizer --authors "Smith" "Johnson" "Lee" --max-papers 5
 
 # Alternative (without installation)
-python main.py --authors "Smith" "Johnson" "Lee" --max_papers 5
+python main.py --authors "Smith" "Johnson" "Lee" --max-papers 5
 ```
 
 By default, papers matching ANY of the specified authors will be returned. To require ALL authors:
 
 ```bash
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --authors "Smith" "Johnson" --author_match all
+biorxiv-summarizer --authors "Smith" "Johnson" --author-match all
 
 # Alternative (without installation)
-python main.py --authors "Smith" "Johnson" --author_match all
+python main.py --authors "Smith" "Johnson" --author-match all
 ```
 
 ### Combined Topic and Author Search
@@ -734,15 +735,15 @@ Or with multiple topics and authors:
 
 ```bash
 # Recommended (if installed with pip install -e .)
-biorxiv-summarizer --topics "CRISPR" "gene editing" --authors "Zhang" "Doudna" --match any --author_match any
+biorxiv-summarizer --topics "CRISPR" "gene editing" --authors "Zhang" "Doudna" --topic-match any --author-match any
 
 # Alternative (without installation)
-python main.py --topics "CRISPR" "gene editing" --authors "Zhang" "Doudna" --match any --author_match any
+python main.py --topics "CRISPR" "gene editing" --authors "Zhang" "Doudna" --topic-match any --author-match any
 ```
 
 In combined searches:
-- `--match` controls how topics are matched (all/any)
-- `--author_match` controls how authors are matched (all/any)
+- `--topic-match` controls how topics are matched (all/any)
+- `--author-match` controls how authors are matched (all/any)
 
 ## Logging Features
 
@@ -785,3 +786,46 @@ python main.py --topic "genomics" --log-file "biorxiv_search.log"
 ```
 
 The log file will contain all log messages, regardless of the console verbosity level.
+
+## Troubleshooting Options
+
+### SSL Connection Issues
+
+If you encounter SSL connection issues with the bioRxiv API, you can disable SSL verification:
+
+```bash
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "genomics" --disable-ssl-verify
+
+# Alternative (without installation)
+python main.py --topic "genomics" --disable-ssl-verify
+```
+
+**Warning**: Disabling SSL verification reduces security and should only be used for troubleshooting purposes.
+
+### API Connection Issues
+
+If the bioRxiv API is consistently unavailable or unreliable, you can bypass it completely and use web scraping directly:
+
+```bash
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "genomics" --bypass-api
+
+# Alternative (without installation)
+python main.py --topic "genomics" --bypass-api
+```
+
+This option skips all API attempts and goes straight to web scraping, which can be useful when the API is down or when you're experiencing persistent connection issues.
+
+You can combine both options for maximum reliability when the API is problematic:
+
+```bash
+# Recommended (if installed with pip install -e .)
+biorxiv-summarizer --topic "genomics" --disable-ssl-verify --bypass-api
+
+# Alternative (without installation)
+python main.py --topic "genomics" --disable-ssl-verify --bypass-api
+```
+
+## Advanced Usage Examples
+{{ ... }}
